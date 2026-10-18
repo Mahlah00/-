@@ -37,9 +37,9 @@ from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.tl.types import PeerChannel
 
 # ====== تنظیمات ======
-api_id = 38302455          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "c4646ac93fcbc703948bf74e76422d5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "mohammadzadhe"
+api_id = 774143          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "62a87b8c12cf0c91f8d5312bfac42371"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "Naji77k"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
@@ -54,7 +54,7 @@ FISH_TRIGGER_TEXT = "ماهی"                 # دستور ماهی‌گیری
 FRIDGE_STORE_KEYWORD = "بندازش تو یخچال"   # دکمه‌ی گذاشتن ماهی توی یخچال
 FEED_BUTTON_KEYWORD = "بده پیشی بخوره"
 COOK_BUTTON_KEYWORD = "بپوخش"
-MAX_FISH_VALUE = 2000            # فقط ماهی‌هایی که ارزششون کمتر از این عدده خورانده/پخته میشن
+MAX_FISH_VALUE = 20000            # فقط ماهی‌هایی که ارزششون کمتر از این عدده خورانده/پخته میشن
 # ======================
 
 client = TelegramClient(session_name, api_id, api_hash)
@@ -75,7 +75,7 @@ ttl_save_enabled = True  # ذخیره‌ی عکس/ویدیوی نابودشون�
 feed_interval_seconds: float | None = None   # None = غذا دادن همراه فارم؛ عدد = چک جدا هر چند ثانیه
 feed_task: asyncio.Task | None = None
 rescue_enabled = True   # کلیک خودکار روی «نجات پیشی خیابونی»
-feed_enabled = True     # وقتی پیشی گشنمیوئه: یخچال رو چک کن و غذا بده
+feed_enabled = True     # وقتی پیشی گشنمیو: یخچال رو چک کن و غذا بده
 feed_lock = asyncio.Lock()
 rescued_msg_ids: set[tuple[int, int]] = set()
 RESCUE_DONE_WORDS = ("کشته شد", "علت مرگ", "نجات پیدا", "نجات یافت", "نجات داده شد", "نجات داد", "صاحب پیدا کرد", "صاحب یک خونه")
