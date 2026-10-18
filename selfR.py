@@ -37,7 +37,7 @@ from telethon.tl.functions.account import UpdateProfileRequest
 
 # ====== تنظیمات ======
 api_id = 38302455          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "hhFd0vbUqU4"  # <-- اینجا رو با api_hash خودت جایگزین کن
+api_hash = "c4646ac93fcbc703948bf74e76422d5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
 session_name = "meow_1256"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
