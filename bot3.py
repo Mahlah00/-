@@ -37,9 +37,9 @@ from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.tl.types import PeerChannel
 
 # ====== تنظیمات ======
-api_id = 774143          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "62a87b8c12cf0c91f8d5312bfac42371"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "Naji77k"
+api_id = 30213358          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "74b35d20203b6670dafcc595f81c4e46"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "Sokot"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
