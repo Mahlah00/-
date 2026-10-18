@@ -37,9 +37,9 @@ from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.tl.types import PeerChannel
 
 # ====== تنظیمات ======
-api_id = 35263817          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "8f221cbae9e25cdafba56e897ed39b5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "meow_ion"
+api_id = 38302455          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "c4646ac93fcbc703948bf74e76422d5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "mohammadzadhe"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
@@ -80,7 +80,7 @@ feed_lock = asyncio.Lock()
 rescued_msg_ids: set[tuple[int, int]] = set()
 RESCUE_DONE_WORDS = ("کشته شد", "علت مرگ", "نجات پیدا", "نجات یافت", "نجات داده شد", "نجات داد", "صاحب پیدا کرد", "صاحب یک خونه")
 rescue_max_tries = 10          # حداکثر تعداد کلیک روی هر پیام نجات
-rescue_delay_seconds = 3.0     # فاصله‌ی بین کلیک‌ها
+rescue_delay_seconds = 1.0     # فاصله‌ی بین کلیک‌ها
 
 afk_enabled = False
 afk_message = "فعلاً نیستم، بعداً جواب می‌دم 🌙"
