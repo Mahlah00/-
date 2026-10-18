@@ -9,7 +9,7 @@
   - فارم خودکار بات میویی، داخل یه گروه مشخص
   - کنترل کامل از راه دور توسط مدیر(ها) از طریق پیوی همین اکانت
 
-نصب پیش‌نیاز:.
+نصب پیش‌نیاز:
     pip install telethon jdatetime
 
 قبل از اجرا:
@@ -25,6 +25,9 @@
 """
 
 import asyncio
+import os
+import re
+import tempfile
 from datetime import datetime, timezone, timedelta
 
 import jdatetime  # برای تبدیل درست تاریخ شمسی -> نصب: pip install jdatetime
@@ -33,17 +36,24 @@ from telethon import TelegramClient, events
 from telethon.tl.functions.account import UpdateProfileRequest
 
 # ====== تنظیمات ======
-api_id = 123456          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "YOUR_API_HASH"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "meow_session"
+api_id = 35263817          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "8f221cbae9e25cdafba56e897ed39b5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "meow_RM"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
 
-ADMIN_IDS: list[int] = [ ایدی عددی اکانت مدیریتی]        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
+ADMIN_IDS: list[int] = [5888377320]        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
 
 MEOWIE_TRIGGER_TEXT = "پیشی"      # پیامی که برای فارم به گروه فرستاده میشه
 MEOWIE_BUTTON_KEYWORD = "برداشت میو پوینت ها"  # عبارت کامل دکمه، تا با دکمه‌های دیگه (مثلاً بانکی) اشتباه گرفته نشه
+FRIDGE_TRIGGER_TEXT = "یخچال میویی"     # پیامی که برای بررسی یخچال فرستاده میشه
+RESCUE_BUTTON_KEYWORD = "نجات پیشی خیابونی"   # دکمه‌ی پیام «پیشی خیابونی»
+FISH_TRIGGER_TEXT = "ماهی"                 # دستور ماهی‌گیری
+FRIDGE_STORE_KEYWORD = "بندازش تو یخچال"   # دکمه‌ی گذاشتن ماهی توی یخچال
+FEED_BUTTON_KEYWORD = "بده پیشی بخوره"
+COOK_BUTTON_KEYWORD = "بپوخش"
+MAX_FISH_VALUE = 15000            # فقط ماهی‌هایی که ارزششون کمتر از این عدده خورانده/پخته میشن
 # ======================
 
 client = TelegramClient(session_name, api_id, api_hash)
@@ -56,6 +66,12 @@ meow_default_seconds = 10 * 60
 
 clock_bio_task: asyncio.Task | None = None
 clock_name_task: asyncio.Task | None = None
+
+ttl_save_enabled = True  # ذخیره‌ی عکس/ویدیوی نابودشونده توی Saved Messages
+rescue_enabled = True   # کلیک خودکار روی «نجات پیشی خیابونی»
+feed_enabled = True     # وقتی پیشی گشنمیوئه: یخچال رو چک کن و غذا بده
+feed_lock = asyncio.Lock()
+rescued_msg_ids: set[tuple[int, int]] = set()
 
 afk_enabled = False
 afk_message = "فعلاً نیستم، بعداً جواب می‌دم 🌙"
@@ -126,15 +142,22 @@ DIGIT_FONTS = {
     "double": {str(i): chr(0x1D7D8 + i) for i in range(10)},                    # 𝟘𝟙𝟚
     "sans":   {str(i): chr(0x1D7E2 + i) for i in range(10)},                    # 𝟢𝟣𝟤
     "mono":   {str(i): chr(0x1D7F6 + i) for i in range(10)},                    # 𝟶𝟷𝟸
-    "digital": {str(i): chr(0x1FBF0 + i) for i in range(10)},                   # 🯰🯱🯲 (سبک ساعت دیجیتال/LCD)
+    "boldsans": {str(i): chr(0x1D7EC + i) for i in range(10)},                 # 𝟬𝟭𝟮
+    "circled": {"0": "⓪", **{str(i): chr(0x2460 + i - 1) for i in range(1, 10)}},   # ①②③
+    "sans_circle": {"0": "⓪", **{str(i): chr(0x2780 + i - 1) for i in range(1, 10)}},  # ➀➁➂
+    "dbl_circle": {"0": "⓪", **{str(i): chr(0x24F5 + i - 1) for i in range(1, 10)}},   # ⓵⓶⓷
+    "keycap": {**{str(i): f"{i}\ufe0f\u20e3" for i in range(10)}, ":": ":"},           # 1️⃣2️⃣3️⃣
+    "fullwidth": {**{str(i): chr(0xFF10 + i) for i in range(10)}, ":": "："},            # ０１２
+    "paren":  {"0": "⓪", **{str(i): chr(0x2474 + i - 1) for i in range(1, 10)}},   # ⑴⑵⑶
     "normal": {str(i): str(i) for i in range(10)},                              # بدون تغییر
 }
 
-clock_digit_font = "circle"  # پیش‌فرض؛ با دستور «clock font <name>» قابل تغییره
+bio_digit_font = "circle"    # فونت ساعت بیو؛ با «clock bio font <name>» عوض میشه
+name_digit_font = "circle"   # فونت ساعت نام خانوادگی؛ با «clock name font <name>» عوض میشه
 
 
-def fancy_digits(s: str) -> str:
-    mapping = DIGIT_FONTS.get(clock_digit_font, DIGIT_FONTS["circle"])
+def fancy_digits(s: str, font: str = "circle") -> str:
+    mapping = DIGIT_FONTS.get(font, DIGIT_FONTS["circle"])
     return "".join(mapping.get(ch, ch) for ch in s)
 
 
@@ -143,14 +166,29 @@ def fancy_digits_preview(font_name: str) -> str:
     return "".join(mapping.get(ch, ch) for ch in "12:34")
 
 
-def fancy_time() -> str:
+def fancy_time(font: str = "circle") -> str:
     """ساعت با سبک فونت اعداد انتخاب‌شده، برای بیو/اسم"""
-    return fancy_digits(now_str())
+    # LRE ... PDF: اجبار نمایش چپ‌به‌راست تا ساعت در محیط فارسی/راست‌به‌چپ برعکس نشه
+    return "\u202a" + fancy_digits(now_str(), font) + "\u202c"
+
+
+BIO_STYLES = {
+    "1": "🌙 {d}  ┃  🕰 {t}",
+    "2": "🗓 {d}  ✦  {gd} {gm}  ✦  ⏰ {t}",
+    "3": "✨ {d} ⋆ 🕐 {t} ✨",
+    "4": "🌸 {d} ‹ ⏳ {t} › 🌸",
+    "5": "💫 {d}  •  🕒 {t}",
+}
+bio_style = "1"  # با دستور «clock bio style <1-5>» عوض میشه
 
 
 def fancy_bio_text() -> str:
     """تاریخ شمسی + ساعت، با ایموجی و فونت اعداد انتخاب‌شده، برای بیو"""
-    return f"📅 {jalali_date_str()}  ⏰ {fancy_time()}"
+    d = "\u202a" + jalali_date_str() + "\u202c"
+    now = _local_now()
+    return BIO_STYLES.get(bio_style, BIO_STYLES["1"]).format(
+        d=d, t=fancy_time(bio_digit_font), gd=now.day, gm=now.strftime("%b")  # روز و ماه میلادی، هر روز خودکار عوض میشه
+    )
 
 
 # ---------- میو دوره‌ای ----------
@@ -193,7 +231,7 @@ async def clock_bio_loop():
 async def clock_name_loop():
     try:
         while True:
-            await client(UpdateProfileRequest(last_name=f"✨ {fancy_time()}"))
+            await client(UpdateProfileRequest(last_name=f"✨ {fancy_time(name_digit_font)}"))
             await asyncio.sleep(clock_interval_seconds)
     except asyncio.CancelledError:
         pass
@@ -252,16 +290,172 @@ async def untoggle_afk() -> str:
 
 # ---------- فارم خودکار (داخل یه گروه مشخص) ----------
 async def click_farm_button(chat_id: int, sent_msg_id: int):
-    """منتظر پیامی می‌مونه که دقیقاً روی sent_msg_id ریپلای زده باشه، و دکمه‌ی برداشت رو می‌زنه"""
+    """منتظر پیامی می‌مونه که دقیقاً روی sent_msg_id ریپلای زده باشه، و دکمه‌ی برداشت رو می‌زنه.
+    اگه توی پیام پاسخ، شکم «گشنمیو» بود، فلوی غذا دادن (یخچال) رو هم راه می‌ندازه."""
     for _ in range(15):  # حداکثر ۱۵ ثانیه صبر
         await asyncio.sleep(1)
         async for msg in client.iter_messages(chat_id, limit=15):
-            if msg.reply_to_msg_id == sent_msg_id and not msg.out and msg.buttons:
+            if msg.reply_to_msg_id == sent_msg_id and not msg.out and msg.buttons and await _is_bot_msg(msg):
+                text = msg.raw_text or ""
                 try:
                     await msg.click(text=lambda t: t and MEOWIE_BUTTON_KEYWORD in t)
                 except Exception:
                     pass
+                hungry = any("شکم" in ln and "گشنمیو" in ln for ln in text.splitlines())
+                if hungry and feed_enabled:
+                    asyncio.create_task(feed_cat_flow(chat_id))
                 return
+
+
+# ---------- غذا دادن به پیشی (یخچال میویی) ----------
+_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+async def _is_bot_msg(msg) -> bool:
+    """فقط پیام‌های ربات (میویی) رو قبول می‌کنیم، نه آدم‌های دیگه‌ی گروه"""
+    try:
+        sender = msg.sender or await msg.get_sender()
+        return bool(getattr(sender, "bot", False))
+    except Exception:
+        return False
+
+
+def _flat_buttons(msg):
+    return [b for row in (msg.buttons or []) for b in row]
+
+
+async def wait_reply_to(chat_id: int, sent_id: int, timeout: int = 15, need_buttons: bool = True):
+    """پاسخ (ریپلای) ربات به پیام sent_id رو که دکمه داره برمی‌گردونه"""
+    for _ in range(timeout):
+        await asyncio.sleep(1)
+        async for msg in client.iter_messages(chat_id, limit=15):
+            if msg.reply_to_msg_id == sent_id and not msg.out and (msg.buttons or not need_buttons) \
+                    and await _is_bot_msg(msg):
+                return msg
+    return None
+
+
+async def wait_button(chat_id: int, msg_id: int, keyword: str, timeout: int = 10):
+    """پیام msg_id (که ربات ادیتش می‌کنه) رو دوباره می‌خونه تا دکمه‌ای با keyword توش پیدا بشه"""
+    for _ in range(timeout):
+        await asyncio.sleep(1)
+        m = await client.get_messages(chat_id, ids=msg_id)
+        if m and m.buttons:
+            for b in _flat_buttons(m):
+                if b.text and keyword in b.text:
+                    return b
+    return None
+
+
+def parse_fridge(msg):
+    """پیام یخچال رو به لیست ماهی‌ها تبدیل می‌کنه: [{'cooked':bool,'raw':bool,'value':int}] به‌ترتیب نمایش"""
+    text = (msg.raw_text or "").translate(_DIGITS)
+    fish, cur = [], None
+    for ln in text.splitlines():
+        if "|" in ln and ("پخته" in ln or "خام" in ln):
+            cur = {"emoji": ln.split("|")[0].strip(), "cooked": "پخته" in ln, "raw": "خام" in ln and "پخته" not in ln, "value": None}
+            fish.append(cur)
+            continue
+        if cur is not None and cur["value"] is None:
+            m = re.search(r"ارزش[\s\u200e\u200f]*:[\s\u200e\u200f]*([0-9][0-9,]*)", ln)
+            if m:
+                cur["value"] = int(m.group(1).replace(",", ""))
+    return [f for f in fish if f["value"] is not None]
+
+
+async def catch_and_store_fish(chat_id: int) -> bool:
+    """«ماهی» می‌فرسته و روی «بندازش تو یخچال» می‌زنه. اگه انجام شد True برمی‌گردونه"""
+    sent = await client.send_message(chat_id, FISH_TRIGGER_TEXT)
+    msg = await wait_reply_to(chat_id, sent.id)
+    if not msg:
+        print("fish: پاسخ ماهی نیومد")
+        return False
+    for b in _flat_buttons(msg):
+        if b.text and FRIDGE_STORE_KEYWORD in b.text:
+            await b.click()
+            print("fish: ماهی توی یخچال انداخته شد")
+            return True
+    print("fish: دکمه‌ی «بندازش تو یخچال» پیدا نشد")
+    return False
+
+
+async def feed_cat_flow(chat_id: int):
+    """قفل می‌گیره تا دو فلوی غذا دادن همزمان اجرا نشن"""
+    async with feed_lock:
+        await asyncio.sleep(3)
+        await _feed_once(chat_id, allow_fish=True)
+
+
+async def _feed_once(chat_id: int, allow_fish: bool):
+    """یخچال رو چک می‌کنه؛ ماهی پخته‌ی ارزان رو می‌ده پیشی بخوره، وگرنه ماهی خام ارزان رو می‌پزه.
+    اگه یخچال خالی بود (و allow_fish)، ماهی می‌گیره، می‌ندازه توی یخچال و دوباره چک می‌کنه"""
+    if True:
+        try:
+            sent = await client.send_message(chat_id, FRIDGE_TRIGGER_TEXT)
+            fmsg = await wait_reply_to(chat_id, sent.id, need_buttons=False)
+            if not fmsg:
+                print("feed: پاسخ یخچال نیومد")
+                return
+
+            fish = parse_fridge(fmsg)
+            # دکمه‌های ماهی: همه‌ی دکمه‌ها به‌جز «ارتقا سطح یخچال» (به‌ترتیب همون پیام)
+            fish_btns = [b for b in _flat_buttons(fmsg) if b.text and "ارتقا" not in b.text]
+            if not fish and (not fish_btns or "یخچال خالی" in normalize(fmsg.raw_text or "")):
+                # یخچال خالیه: ماهی بگیر، بنداز توی یخچال، و دوباره فلوی پخت/غذا رو اجرا کن
+                if allow_fish and await catch_and_store_fish(chat_id):
+                    await asyncio.sleep(2)
+                    await _feed_once(chat_id, allow_fish=False)
+                return
+            if not fish or len(fish) != len(fish_btns):
+                print(f"feed: تعداد ماهی‌ها ({len(fish)}) با دکمه‌ها ({len(fish_btns)}) نمی‌خونه، انجام نشد")
+                return
+            # اول با ایموجی گوشه‌ی هر ماهی به دکمه‌اش وصل می‌کنیم (دکمه‌ها هر بار عوض میشن)؛
+            # اگه ایموجی‌ها یکتا و کامل تطبیق نکرد، به‌ترتیب نمایش برمی‌گردیم
+            matched = []
+            for f in fish:
+                hits = [b for b in fish_btns if f["emoji"] and b.text.strip() == f["emoji"]]
+                matched.append(hits[0] if len(hits) == 1 else None)
+            if None not in matched and len({id(b) for b in matched}) == len(fish):
+                for f, b in zip(fish, matched):
+                    f["btn"] = b
+            else:
+                for f, b in zip(fish, fish_btns):
+                    f["btn"] = b
+
+            cooked = [f for f in fish if f["cooked"] and f["value"] < MAX_FISH_VALUE]
+            raw = [f for f in fish if f["raw"] and f["value"] < MAX_FISH_VALUE]
+
+            if cooked:
+                pick = min(cooked, key=lambda f: f["value"])
+                await pick["btn"].click()
+                fb = await wait_button(chat_id, fmsg.id, FEED_BUTTON_KEYWORD)
+                if fb:
+                    await fb.click()
+                    print("feed: ماهی پخته داده شد")
+                return
+
+            if raw:
+                pick = min(raw, key=lambda f: f["value"])
+                await pick["btn"].click()
+                cb = await wait_button(chat_id, fmsg.id, COOK_BUTTON_KEYWORD)
+                if not cb:
+                    return
+                await cb.click()
+                # منوی تأیید: دکمه‌ی سبز ✓ (پخت) و دکمه‌ی قرمز ✗ (انصراف)
+                await asyncio.sleep(2)
+                async for m in client.iter_messages(chat_id, limit=8):
+                    # فقط منوی تأییدِ مربوط به همین پیام: یا خودِ پیام ادیت‌شده، یا ریپلای ربات به پیام‌های خودمون
+                    mine = m.id == fmsg.id or m.reply_to_msg_id in (fmsg.id, sent.id)
+                    if mine and not m.out and m.buttons and "اطمینان" in (m.raw_text or "") and await _is_bot_msg(m):
+                        btns = _flat_buttons(m)
+                        bad = ("❌", "✖", "✕", "×", "✗", "❎")
+                        good = [b for b in btns if b.text and not any(x in b.text for x in bad)]
+                        if good:
+                            await good[0].click()
+                            print("feed: پخت ماهی خام تأیید شد")
+                        break
+        except Exception as e:
+            print(f"خطا توی غذا دادن: {e}")
 
 
 async def meowie_farm_once(chat_id: int | None = None):
@@ -320,113 +514,106 @@ async def delete_all_my_messages(chat_id: int) -> int:
     return len(ids)
 
 
-HELP_TEXT = """📖 Self-bot commands — full list
+HELP_TEXT = """📖 راهنمای کامل سلف‌بات
+(دستورها انگلیسی‌اند، توضیح‌ها فارسی. دستورها رو از خودِ اکانت سلف بفرست.)
 
-🐱 MEOW (send in any chat, from your own account)
-meow on            — start meow every 10 min (default) in this chat
-meow on 5          — start meow every 5 min in this chat (any number of minutes)
-meow off           — stop meow in this chat
+🐱 میو
+meow on — فعال‌سازی میو توی همین چت (پیش‌فرض هر ۱۰ دقیقه)
+meow on 5 — میو هر ۵ دقیقه
+meow off — خاموش کردن میو توی همین چت
+meow +5 — پنج دقیقه به زمان پیش‌فرض میو اضافه می‌کنه
+meow -5 — پنج دقیقه از زمان پیش‌فرض کم می‌کنه
 
-🕐 AUTO CLOCK (send from your own account, applies to your whole account)
-clock bio on       — bio updates every 60s with Jalali date + time
-clock bio off
-clock name on      — last name updates every 60s with time only
-clock name off
-clock font <name>  — choose the digit style used for the clock, options:
-                     circle, bold, double, sans, mono, digital, normal
-clock font list    — show a live preview of every font option
+🕐 ساعت خودکار
+clock bio on / clock bio off — ساعت و تاریخ شمسی روی بیو
+clock bio style — نمایش سبک‌های بیو؛ clock bio style 3 — انتخاب سبک (۱ تا ۵)
+clock name on / clock name off — ساعت روی نام خانوادگی
+clock font list — نمایش همه‌ی فونت‌های ساعت
+clock bio font <name> — فونت ساعت بیو، مثلاً: clock bio font keycap
+clock name font <name> — فونت ساعت نام خانوادگی، مثلاً: clock name font circled
+(فونت بیو و نام جدا از هم تنظیم میشن)
 
-🌙 AFK (send from your own account, applies to your whole account)
-afk on             — turn on AFK with the default message
-afk on <message>   — turn on AFK with a custom message, e.g.: afk on sleeping now
-afk off            — turn off AFK
-(AFK only auto-replies once per person, only in private chats, and never to bots)
+🌙 افک (پاسخ خودکار)
+afk on — روشن کردن با پیام پیش‌فرض
+afk on <message> — روشن کردن با پیام دلخواه، مثلاً: afk on خوابم
+afk off — خاموش کردن
+(فقط توی پیوی و فقط یک بار به هر نفر جواب میده؛ به ربات‌ها جواب نمیده)
 
-🐾 MEOWIE AUTO-FARM (send from your own account)
-farm on                 — turn on; if no group is set yet, it asks:
-                          "Send the group's numeric ID or link."
-                          reply with the ID/link — farm turns on for that group
-farm off                — turn off
-farm now                — collect once immediately, without waiting for the timer
-farm +5                 — increase farm interval by 5 minutes
-farm -5                 — decrease farm interval by 5 minutes
-farm interval 30        — set farm interval directly, in minutes
-farm interval 2h        — set farm interval directly, in hours
-(every cycle it sends "پیشی" in the group, waits up to 15s for Meowie's reply
- to that exact message, then clicks the button containing "برداشت")
+🐾 فارم خودکار میویی
+farm on — روشن کردن؛ اگه گروهی تنظیم نشده باشه آیدی عددی یا لینک گروه رو می‌پرسه
+farm off — خاموش کردن
+farm now — همین الان یک بار فارم کن
+farm +5 / farm -5 — پنج دقیقه به فاصله‌ی فارم اضافه/کم می‌کنه
+farm interval 30 — فاصله‌ی فارم برحسب دقیقه
+farm interval 2h — فاصله‌ی فارم برحسب ساعت
+(هر دور «پیشی» می‌فرسته، حداکثر ۱۵ ثانیه منتظر جواب میویی می‌مونه
+و روی دکمه‌ی «برداشت میو پوینت ها» می‌زنه)
+توجه: فارم باید خودِ اکانت سلف بفرسته؛ پیام اکانت مدیر توی گروه، خودش فارم نمی‌کنه.
 
-meow +5            — increase the DEFAULT meow interval (used when you type
-                     "meow on" with no number) by 5 minutes
-meow -5            — decrease it by 5 minutes
+🐈 نجات و غذا دادن
+rescue on / rescue off — کلیک خودکار روی دکمه‌ی «نجات پیشی خیابونی» (پیش‌فرض روشن)
+feed on / feed off — غذا دادن خودکار (پیش‌فرض روشن):
+  اگه بعد از «پیشی» شکم «گشنمیو» بود، «یخچال میویی» رو می‌فرسته و
+  • ماهی پخته‌ی زیر ۲۰۰۰ سکه → کلیک روی ماهی و «بده پیشی بخوره»
+  • وگرنه ماهی خام زیر ۲۰۰۰ سکه → کلیک روی ماهی، «بپوخش» و دکمه‌ی سبز ✓
+  • اگه یخچال خالی بود → «ماهی» می‌فرسته، «بندازش تو یخچال» رو می‌زنه و دوباره یخچال رو چک می‌کنه و مراحل پخت رو انجام میده
+  (ارزان‌ترین ماهی انتخاب میشه و هیچ ماهی‌ای فروخته نمیشه)
 
-🗑 DELETE MESSAGES (send from your own account)
-clean all
-  — reply to any of YOUR OWN messages in a chat with this text
-  — deletes every message you've ever sent in that chat
+🔒 ذخیره‌ی عکس/ویدیوی نابودشونده
+ttl on / ttl off — هر عکس/ویدیو/ویس سکرت (تایمردار یا یک‌بار‌مصرف) که کسی توی پیوی برات بفرسته، خودکار توی Saved Messages ذخیره میشه (پیش‌فرض روشن)
 
-delete messages
-  — bot asks: "Where should I delete messages from? Reply: group or private"
-  — you reply: group
-      → bot asks: "Send the group's numeric ID or link."
-      → you send it → all your messages in that group are deleted
-  — you reply: private
-      → bot asks: "Send the numeric ID or username of the person."
-      → you send it → all your messages in that private chat are deleted
+🗑 حذف پیام‌ها
+clean all — روی یکی از پیام‌های خودت ریپلای کن و بنویس؛ همه‌ی پیام‌های خودت توی اون چت پاک میشه
+delete messages — ربات می‌پرسه: group یا private
+  • group → آیدی عددی یا لینک گروه رو بفرست، پیام‌های خودت اونجا پاک میشه
+  • private → آیدی عددی یا یوزرنیم طرف رو بفرست، پیام‌های خودت توی اون پیوی پاک میشه
 
-❓ HELP
-help               — show this exact message
+❓ راهنما
+help — نمایش همین راهنما
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📡 ADMIN-ONLY COMMANDS
-(these only work when sent as a DM directly to this account,
- from an account whose numeric ID is in ADMIN_IDS)
+━━━━━━━━━━━━━━━━━━━━
+📡 دستورهای مدیر (ADMIN)
+(آیدی عددی مدیر باید توی ADMIN_IDS باشه. دستورها رو مدیر توی پیوی همین اکانت می‌فرسته)
 
-All commands above also work the same way in the admin's DM:
-meow on / meow on <minutes> / meow off
-afk on / afk on <message> / afk off
-clock bio on / clock bio off
-clock name on / clock name off
-farm +5 / farm -5 / farm interval <value>
-delete messages   (same group/private flow as above)
-help
+همه‌ی دستورهای بالا (meow, afk, clock, farm, delete messages, help) توی پیوی مدیر هم کار می‌کنن.
 
-Extra admin-only commands:
-ping
-  — replies with round-trip time in ms
-
-farm now
-  — collect the farm points immediately, on demand, without waiting for the timer
-
-rmg <text>
-  — send this in ANY chat (group or private) where this account is also present.
-  — this account will send <text> as its own message in that same chat.
-  — example: rmg hi  →  this account sends "hi" there.
-  — example: rmg پیشی  →  this account sends "پیشی" and then automatically
-    waits for Meowie's reply and clicks the "برداشت میو پوینت ها" button,
-    exactly like the farm feature — useful for triggering many self-bot
-    accounts in the same group at once.
-  — only works if you (the sender) are in this account's ADMIN_IDS.
-
-mio online is gp
-  — bot asks: "Send the group's numeric ID or link."
-  — optionally add a space and a number of minutes, e.g.: -1001234567890 5
-  — activates meow in that group (default 10 min if no number given)
-
-Reply (in ANY chat, group or private) to a message that THIS ACCOUNT sent,
-with the word:
-پاک   or   delete
-  — deletes just that one message
+ping — جواب میده و زمان پاسخ رو برحسب میلی‌ثانیه نشون میده
+farm now — توی پیوی: فارم توی گروه تنظیم‌شده. توی یک گروه: خودِ اکانت سلف همون‌جا «پیشی» می‌فرسته و دکمه رو می‌زنه
+mio online is gp — ربات آیدی عددی یا لینک گروه رو می‌پرسه (اختیاری: فاصله و عدد دقیقه، مثلاً -1001234567890 5)؛ میو توی اون گروه فعال میشه
+rmg <text> — توی هر چتی که اکانت سلف هم هست بفرست؛ اکانت سلف همون متن رو توی همون چت می‌فرسته
+  مثال: rmg hi ← سلف «hi» می‌فرسته
+  مثال: rmg پیشی ← سلف «پیشی» می‌فرسته و دکمه‌ی برداشت رو هم می‌زنه
+پاک یا delete — روی پیامی که خودِ اکانت سلف فرستاده ریپلای کن تا همون یک پیام پاک بشه
 
 ━━━━━━━━━━━━━━
-Made by @MRZverse
+ساخته‌شده توسط @MRZverse
 """
+
+async def send_help(event, edit):
+    """HELP_TEXT از حد ۴۰۹۶ کاراکتر تلگرام بلندتره؛ تکه‌تکه می‌فرستیم"""
+    chunks, cur = [], ""
+    for block in HELP_TEXT.split("\n\n"):
+        if len(cur) + len(block) + 2 > 3500 and cur:
+            chunks.append(cur); cur = block
+        else:
+            cur = cur + "\n\n" + block if cur else block
+    if cur:
+        chunks.append(cur)
+    if edit:
+        await event.edit(chunks[0])
+    else:
+        await event.reply(chunks[0])
+    for c in chunks[1:]:
+        await client.send_message(event.chat_id, c)
+
+
 
 
 # ---------- هندلر اصلی (پیام‌های خودِ اکانت) ----------
 @client.on(events.NewMessage(outgoing=True))
 async def handler(event):
     global awaiting_farm_group, farm_chat_id, farm_interval_seconds, meow_default_seconds
-    global delete_flow_stage, clock_digit_font
+    global delete_flow_stage, bio_digit_font, name_digit_font, rescue_enabled, feed_enabled, bio_style, ttl_save_enabled
 
     text = normalize(event.raw_text)
     lower = text.lower()
@@ -509,6 +696,17 @@ async def handler(event):
     elif lower == "clock bio on":
         await event.edit(await toggle_clock_bio())
 
+    elif lower == "clock bio style" or lower.startswith("clock bio style "):
+        arg = lower[len("clock bio style"):].strip()
+        if arg in BIO_STYLES:
+            bio_style = arg
+            await event.edit(f"Bio style {arg} ✅ preview:\n{fancy_bio_text()}")
+        else:
+            prev = "\n".join(
+                f"{k}: {v.format(d='1405/07/26', t=fancy_time(bio_digit_font), gd=_local_now().day, gm=_local_now().strftime('%b'))}" for k, v in BIO_STYLES.items()
+            )
+            await event.edit(f"Bio styles (use: clock bio style <number>):\n{prev}\n\nCurrent: {bio_style}")
+
     elif lower == "clock bio off":
         await event.edit(await untoggle_clock_bio())
 
@@ -518,20 +716,30 @@ async def handler(event):
     elif lower == "clock name off":
         await event.edit(await untoggle_clock_name())
 
-    elif lower == "clock font list":
+    elif lower in ("clock font list", "clock bio font list", "clock name font list"):
         preview = "\n".join(
             f"{name}: {fancy_digits_preview(name)}" for name in DIGIT_FONTS
         )
-        await event.edit(f"Available clock fonts:\n{preview}\n\nCurrent: {clock_digit_font}")
+        await event.edit(
+            f"Available clock fonts:\n{preview}\n\nBio font: {bio_digit_font}\nName font: {name_digit_font}\n\n"
+            "Set bio font:  clock bio font <name>\nSet name font: clock name font <name>"
+        )
 
-    elif lower.startswith("clock font"):
-        name = lower[len("clock font"):].strip()
+    elif lower.startswith("clock bio font"):
+        name = lower[len("clock bio font"):].strip()
         if name in DIGIT_FONTS:
-            clock_digit_font = name
-            await event.edit(f"Clock font set to '{name}' ✅ preview: {fancy_time()}")
+            bio_digit_font = name
+            await event.edit(f"Bio clock font set to '{name}' ✅ preview: {fancy_time(name)}")
         else:
-            options = ", ".join(DIGIT_FONTS.keys())
-            await event.edit(f"Unknown font. Options: {options}")
+            await event.edit("Unknown font. See the list with: clock font list")
+
+    elif lower.startswith("clock name font"):
+        name = lower[len("clock name font"):].strip()
+        if name in DIGIT_FONTS:
+            name_digit_font = name
+            await event.edit(f"Name clock font set to '{name}' ✅ preview: {fancy_time(name)}")
+        else:
+            await event.edit("Unknown font. See the list with: clock font list")
 
     elif lower.startswith("afk on"):
         custom = text[len("afk on"):].strip()
@@ -554,6 +762,30 @@ async def handler(event):
 
     elif lower == "farm off":
         await event.edit(await untoggle_farm())
+
+    elif lower == "ttl on":
+        ttl_save_enabled = True
+        await event.edit("Self-destruct media saving is ON ✅")
+
+    elif lower == "ttl off":
+        ttl_save_enabled = False
+        await event.edit("Self-destruct media saving is OFF ❌")
+
+    elif lower == "rescue on":
+        rescue_enabled = True
+        await event.edit("Auto-rescue of stray cats is ON ✅")
+
+    elif lower == "rescue off":
+        rescue_enabled = False
+        await event.edit("Auto-rescue of stray cats is OFF ❌")
+
+    elif lower == "feed on":
+        feed_enabled = True
+        await event.edit("Auto-feed (fridge check when hungry) is ON ✅")
+
+    elif lower == "feed off":
+        feed_enabled = False
+        await event.edit("Auto-feed is OFF ❌")
 
     elif lower == "farm now":
         if farm_chat_id is None:
@@ -588,7 +820,7 @@ async def handler(event):
         await event.edit(f"Default meow interval: {meow_default_seconds/60:g} min")
 
     elif lower == "help":
-        await event.edit(HELP_TEXT)
+        await send_help(event, True)
 
     elif lower == "clean all":
         if not event.is_reply:
@@ -605,7 +837,7 @@ async def handler(event):
 # ---------- هندلر پیام‌های ورودی: افک + کنترل مدیر ----------
 @client.on(events.NewMessage(incoming=True))
 async def incoming_watcher(event):
-    global farm_interval_seconds, delete_flow_stage, clock_digit_font
+    global farm_interval_seconds, delete_flow_stage, bio_digit_font, name_digit_font, rescue_enabled, feed_enabled
 
     sender_id = event.sender_id
     text = normalize(event.raw_text or "")
@@ -622,6 +854,12 @@ async def incoming_watcher(event):
     # --- rmg <text>: وقتی مدیر این رو تو یه گپ می‌فرسته، این اکانت هم همون متن رو
     # توی همون گپ می‌فرسته (برای هماهنگ‌کردن چند اکانت سلف با هم). اگه متن دقیقاً
     # کلمه‌ی محرک میویی («پیشی») باشه، بعد از ارسال، دنبال دکمه‌ی برداشت هم می‌گرده.
+    # --- farm now از طرف مدیر توی گروه: خودِ اکانت سلف همون‌جا «پیشی» می‌فرسته ---
+    if sender_id in ADMIN_IDS and not event.is_private and lower == "farm now":
+        sent = await client.send_message(event.chat_id, MEOWIE_TRIGGER_TEXT)
+        await click_farm_button(event.chat_id, sent.id)
+        return
+
     if sender_id in ADMIN_IDS and lower.startswith("rmg "):
         payload = text[len("rmg "):].strip()
         if payload:
@@ -708,7 +946,7 @@ async def incoming_watcher(event):
             return
 
         if lower == "help":
-            await event.reply(HELP_TEXT)
+            await send_help(event, False)
             return
 
         if lower == "farm now":
@@ -779,20 +1017,32 @@ async def incoming_watcher(event):
         elif lower == "clock name off":
             await event.reply(await untoggle_clock_name())
             return
-        elif lower == "clock font list":
+        elif lower in ("clock font list", "clock bio font list", "clock name font list"):
             preview = "\n".join(
                 f"{name}: {fancy_digits_preview(name)}" for name in DIGIT_FONTS
             )
-            await event.reply(f"Available clock fonts:\n{preview}\n\nCurrent: {clock_digit_font}")
+            await event.reply(
+                f"Available clock fonts:\n{preview}\n\nBio font: {bio_digit_font}\nName font: {name_digit_font}\n\n"
+                "Set bio font:  clock bio font <name>\nSet name font: clock name font <name>"
+            )
             return
-        elif lower.startswith("clock font"):
-            name = lower[len("clock font"):].strip()
+
+        elif lower.startswith("clock bio font"):
+            name = lower[len("clock bio font"):].strip()
             if name in DIGIT_FONTS:
-                clock_digit_font = name
-                await event.reply(f"Clock font set to '{name}' ✅ preview: {fancy_time()}")
+                bio_digit_font = name
+                await event.reply(f"Bio clock font set to '{name}' ✅ preview: {fancy_time(name)}")
             else:
-                options = ", ".join(DIGIT_FONTS.keys())
-                await event.reply(f"Unknown font. Options: {options}")
+                await event.reply("Unknown font. See the list with: clock font list")
+            return
+
+        elif lower.startswith("clock name font"):
+            name = lower[len("clock name font"):].strip()
+            if name in DIGIT_FONTS:
+                name_digit_font = name
+                await event.reply(f"Name clock font set to '{name}' ✅ preview: {fancy_time(name)}")
+            else:
+                await event.reply("Unknown font. See the list with: clock font list")
             return
 
     # --- پاسخ خودکار افک (فقط پیوی، و نه به بات‌ها) ---
@@ -808,6 +1058,60 @@ async def incoming_watcher(event):
         return
     afk_replied_chats.add(chat_id)
     await event.reply(afk_message)
+
+
+# --- نجات خودکار «پیشی خیابونی» توی گروه‌های میو/فارم ---
+@client.on(events.NewMessage(incoming=True))
+async def rescue_watcher(event):
+    if not rescue_enabled or not event.is_group:
+        return
+    cid = event.chat_id
+    if cid != farm_chat_id and cid not in active_meow_tasks:
+        return
+    msg = event.message
+    if not msg.buttons or (cid, msg.id) in rescued_msg_ids:
+        return
+    for b in _flat_buttons(msg):
+        if b.text and RESCUE_BUTTON_KEYWORD in b.text:
+            rescued_msg_ids.add((cid, msg.id))
+            try:
+                await b.click()
+                print("rescue: روی «نجات پیشی خیابونی» کلیک شد")
+            except Exception as e:
+                print(f"rescue: {e}")
+            break
+
+
+# --- ذخیره‌ی عکس/ویدیوی نابودشونده (سکرت/یک‌بار‌مصرف) توی Saved Messages ---
+@client.on(events.NewMessage(incoming=True))
+async def ttl_watcher(event):
+    if not ttl_save_enabled or not event.is_private or not event.message.media:
+        return
+    ttl = getattr(event.message.media, "ttl_seconds", None)
+    if not ttl:
+        return
+    try:
+        sender = await event.get_sender()
+        name = " ".join(x for x in [getattr(sender, "first_name", None), getattr(sender, "last_name", None)] if x) or "Unknown"
+        uname = f"@{sender.username}" if getattr(sender, "username", None) else "no username"
+        caption = f"🔒 Self-destruct media saved\nFrom: {name} ({uname}) — ID {event.sender_id}\nTimer: {ttl}s"
+        tmpdir = tempfile.mkdtemp(prefix="ttl_")
+        path = await event.message.download_media(file=tmpdir + os.sep)
+        if not path:
+            await client.send_message("me", caption + "\n⚠️ Could not download the media.")
+            return
+        await client.send_file("me", path, caption=caption)
+        try:
+            os.remove(path)
+            os.rmdir(tmpdir)
+        except OSError:
+            pass
+    except Exception as e:
+        print(f"ttl: {e}")
+        try:
+            await client.send_message("me", f"⚠️ Failed to save a self-destruct media: {e}")
+        except Exception:
+            pass
 
 
 async def main():
