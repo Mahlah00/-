@@ -39,7 +39,7 @@ from telethon.tl.types import PeerChannel
 # ====== تنظیمات ======
 api_id = 35263817          # <-- اینجا رو با api_id خودت جایگزین کن
 api_hash = "8f221cbae9e25cdafba56e897ed39b5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "meow_session"
+session_name = "meow_ion"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
@@ -1336,7 +1336,7 @@ async def dm_logger(event):
             if no_caption or len(cap) > 1000:
                 await send_media(None)
                 await client.send_message(dm_log_target, (text + "\n\n" if text else "") + info)
-            else
+            else:
                 await send_media(cap)
         except Exception:
             # انواعی که با send_file نمیشن (لوکیشن، نظرسنجی، مخاطب، ...): فوروارد + اطلاعات فرستنده
