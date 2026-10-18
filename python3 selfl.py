@@ -36,9 +36,9 @@ from telethon import TelegramClient, events
 from telethon.tl.functions.account import UpdateProfileRequest
 
 # ====== تنظیمات ======
-api_id = 38302455          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "c4646ac93fcbc703948bf74e76422d5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "meow_1256"
+api_id = 774143          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "62a87b8c12cf0c91f8d5312bfac42371"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "meow_naji"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
