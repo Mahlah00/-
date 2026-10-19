@@ -39,8 +39,8 @@ from telethon.errors import FloodWaitError
 from telethon.tl.types import PeerChannel
 
 # ====== تنظیمات ======
-api_id = 35263817          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "8f221cbae9e25cdafba56e897ed39b5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
+api_id = 352617          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = ""  # <-- اینجا رو با api_hash خودت جایگزین کن
 session_name = "RM"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
