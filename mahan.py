@@ -41,14 +41,14 @@ from telethon.errors import FloodWaitError
 from telethon.tl.types import PeerChannel
 
 # ====== تنظیمات ======
-api_id = 38633798          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "0be9bd92e224dec99c70cbe48d9ab542"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "zey"
+api_id = 21525524          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "084f81d074871e794e43aafbc93f5d81"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "mahan"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
 
-ADMIN_IDS: list[int] = [8865852660]        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
+ADMIN_IDS: list[int] = [8955787315]        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
 
 MEOWIE_TRIGGER_TEXT = "پیشی"      # پیامی که برای فارم به گروه فرستاده میشه
 MEOWIE_BUTTON_KEYWORD = "برداشت میو پوینت ها"  # عبارت کامل دکمه، تا با دکمه‌های دیگه (مثلاً بانکی) اشتباه گرفته نشه
@@ -83,7 +83,7 @@ feed_lock = asyncio.Lock()
 rescued_msg_ids: set[tuple[int, int]] = set()
 RESCUE_DONE_WORDS = ("کشته شد", "علت مرگ", "نجات پیدا", "نجات یافت", "نجات داده شد", "نجات داد", "صاحب پیدا کرد", "صاحب یک خونه")
 rescue_max_tries = 10          # حداکثر تعداد کلیک روی هر پیام نجات
-rescue_delay_seconds = 3.0     # فاصله‌ی بین کلیک‌ها
+rescue_delay_seconds = 1.5     # فاصله‌ی بین کلیک‌ها
 
 afk_enabled = False
 afk_message = "فعلاً نیستم، بعداً جواب می‌دم 🌙"
