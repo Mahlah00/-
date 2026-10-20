@@ -42,7 +42,7 @@ from telethon.tl.types import PeerChannel
 # ====== تنظیمات ======
 api_id = 35263817          # <-- اینجا رو با api_id خودت جایگزین کن
 api_hash = "8f221cbae9e25cdafba56e897ed39b5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "Moh"
+session_name = "meow_1"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
@@ -82,7 +82,7 @@ feed_enabled = True     # وقتی پیشی گشنمیوئه: یخچال رو چ
 feed_lock = asyncio.Lock()
 rescued_msg_ids: set[tuple[int, int]] = set()
 RESCUE_DONE_WORDS = ("کشته شد", "علت مرگ", "نجات پیدا", "نجات یافت", "نجات داده شد", "نجات داد", "صاحب پیدا کرد", "صاحب یک خونه")
-rescue_max_tries = 5          # حداکثر تعداد کلیک روی هر پیام نجات
+rescue_max_tries = 10          # حداکثر تعداد کلیک روی هر پیام نجات
 rescue_delay_seconds = 1.3     # فاصله‌ی بین کلیک‌ها
 
 afk_enabled = False
@@ -365,7 +365,7 @@ async def click_farm_button(chat_id: int, sent_msg_id: int):
                 except Exception:
                     pass
                 hungry, room = feed_decision(text)
-                print(f"شکم: {parse_stomach(text)} | قانون‌ها: {feed_rules} | غذا بده؟ {hungry}")
+                print(f"شکم: {parse_stomach(text)} | متن‌های گرسنگی: {feed_hunger_texts} | غذا بده؟ {hungry}")
                 if hungry and feed_enabled and feed_interval_seconds is None:
                     asyncio.create_task(feed_cat_flow(chat_id, room))
                 return
@@ -490,6 +490,7 @@ def is_hungry_text(text: str) -> bool:
     return any("شکم" in ln and "گشنمیو" in ln for ln in (text or "").splitlines())
 
 
+feed_hunger_texts: list[str] = ["گشنمیو", "دیگه کار نمیکنمیو"]   # متن‌هایی که اگه جلوی «شکم» باشن سلف غذا میده
 feed_rules: dict[int, int] = {}   # {ظرفیت شکم: حداکثر عددی که تا اون سلف غذا میده}  مثلا feed 15/5 → {15: 5}
 
 
@@ -515,16 +516,32 @@ def parse_stomach(text: str):
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
+def _loose(t: str) -> str:
+    """برای مقایسه‌ی متن‌ها: نویسه‌های نامرئی و فاصله‌ها حذف، حرف‌های تکراری (گشنمیووو) یکی میشن"""
+    t = _clean(normalize(t or "")).replace(" ", "").replace(".", "")
+    return re.sub(r"(.)\1+", r"\1", t)
+
+
 def feed_decision(text: str):
-    """(باید غذا بده؟، جای خالی شکم). فقط عددها و قانون‌هایی که با دستور feed تنظیم شده؛
-    متن «گشنمیو» ملاک نیست. قانون: ظرفیت شکم → وقتی پُری فعلی ≤ عدد تعیین‌شده"""
+    """(باید غذا بده؟، جای خالی شکم).
+    اصلی‌ترین ملاک: اگه خط «شکم» یکی از متن‌های گرسنگیِ تنظیم‌شده رو داشته باشه (feed text add ...)
+    ملاک دوم (اختیاری): قانون عددی feed 12/7"""
+    t = _clean(text)
+    line = next((ln for ln in t.splitlines() if "شکم" in ln), t)
+    lline = _loose(line)
+    text_hit = any(_loose(p) and _loose(p) in lline for p in feed_hunger_texts)
     st = parse_stomach(text)
-    if not st:
-        return False, None
-    cap, cur = st
-    room = max(cap - cur, 0)
-    rule = feed_rules.get(cap)
-    return (rule is not None and cur <= rule and room > 0), room
+    room = None
+    rule_hit = False
+    if st:
+        cap, cur = st
+        room = max(cap - cur, 0)
+        rule = feed_rules.get(cap)
+        rule_hit = rule is not None and cur <= rule
+    need = text_hit or rule_hit
+    if room == 0:
+        need = False
+    return need, room
 
 
 async def safe_click(btn) -> bool:
@@ -767,7 +784,7 @@ def save_settings():
             "fish_feed_max": fish_feed_max, "fish_cook_enabled": fish_cook_enabled,
             "fish_cook_min": fish_cook_min, "feed_enabled": feed_enabled,
             "rescue_enabled": rescue_enabled, "rescue_max_tries": rescue_max_tries,
-            "farm_chat_id": farm_chat_id,
+            "farm_chat_id": farm_chat_id, "feed_hunger_texts": feed_hunger_texts,
         }
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -793,6 +810,8 @@ def load_settings():
         feed_enabled = d.get("feed_enabled", feed_enabled)
         rescue_enabled = d.get("rescue_enabled", rescue_enabled)
         rescue_max_tries = d.get("rescue_max_tries", rescue_max_tries)
+        if d.get("feed_hunger_texts"):
+            feed_hunger_texts[:] = d["feed_hunger_texts"]
         if farm_chat_id is None and d.get("farm_chat_id"):
             farm_chat_id = d["farm_chat_id"]
         print(f"تنظیمات ذخیره‌شده خونده شد (قانون‌های غذادهی: {feed_rules})")
@@ -955,13 +974,15 @@ feed on / feed off — غذا دادن خودکار (پیش‌فرض روشن)
 feed interval 30 — هر ۳۰ دقیقه گرسنگی رو چک کن (feed interval 2h = هر ۲ ساعت)
 feed interval off — برگشت به حالت «چک بعد از هر فارم»
 
-سلف فقط وقتی غذا میده که عددهای شکم (مثلاً 15/8) به قانونی که تو گذاشتی برسه؛ متن «گشنمیو» ملاک نیست. بعد از هر کار با دکمه‌ی BK به یخچال برمیگرده و دوباره بررسی میکنه:
+سلف وقتی غذا میده که جلوی «شکم» یکی از متن‌های گرسنگیِ تنظیم‌شده باشه (پیش‌فرض: گشنمیو و دیگه کار نمیکنمیو)؛ عددها فقط برای تعیین جای خالی شکم و انتخاب ماهیِ مناسب خونده میشن. بعد از هر کار با دکمه‌ی BK به یخچال برمیگرده و دوباره بررسی میکنه:
   ۱) ماهی پخته با ارزش ≥ حد فروش → «فروش ماهی» (هر چی بالاتر از حد باشه فروخته میشه)
   ۲) اگه باید غذا بده → ماهی پخته‌ای که ارزش غذاییش تو جای خالی شکم جا بشه (مثلاً ۴ جا خالی → ماهی با ارزش غذایی ۴) → «بده پیشی بخوره» → «پیشی خوردش» → BK
   ۳) همه‌ی ماهی‌های خام بدون استثنا → «بپوخش» → دکمه‌ی سبز ✓ → BK؛ وقتی ربات میویی توی پیوی پیام «ماهی شما پخید» رو فرستاد، سلف توی گروه فارم یخچال رو چک میکنه (غذا دادن یا فروش)
   ۴) اگه یخچال پر نیست (مثلاً 2 / 5) → «ماهی» می‌فرسته و «بندازش تو یخچال» رو میزنه
 
-feed — راه‌اندازی گفتگویی غذادهی: اول ظرفیت شکم گربه رو می‌پرسه (مثلاً 15)، بعد عددی که با دیدنش غذا بده (مثلاً 8) و بعد پیام موفقیت میده. هر ظرفیت قانون جدا داره
+feed text add من گشنمیووو — متن گرسنگی اضافه میکنه: اگه ربات میویی بعد از «پیشی» جلوی «شکم» این متن (یا متن‌های شبیهش، مثلاً با «و» و «.» اضافه) رو نوشت، سلف به پیشی غذا میده
+feed text del <text> — حذف یک متن / feed text list — نمایش متن‌ها / feed text reset — برگشت به پیش‌فرض (گشنمیو ، دیگه کار نمیکنمیو)
+(اختیاری) feed 12/7 — قانون عددی هم میشه گذاشت؛ ولی ملاک اصلی همون متن‌هاست
 feed rules — نمایش قانون‌ها / feed reset — پاک کردن قانون‌ها
 
 fish sell above 50000 — ماهی پخته‌ی با ارزش ≥ این عدد فروخته میشه (50k هم قبوله)
@@ -1001,6 +1022,7 @@ farm now — توی پیوی: فارم توی گروه تنظیم‌شده. تو
 mio online is gp — ربات آیدی عددی یا لینک گروه رو می‌پرسه (اختیاری: فاصله و عدد دقیقه، مثلاً -1001234567890 5)؛ میو توی اون گروه فعال میشه
 rmg <text> — توی هر چتی که اکانت سلف هم هست بفرست؛ اکانت سلف همون متن رو توی همون چت می‌فرسته
   اگه متن یه دستور تنظیمی باشه (rescue on/off ، feed on/off ، fish sell above 28000 ، fish cook ... ، feed 15/5) متن ارسال نمیشه و فقط همون دستور اجرا میشه. مثال: rmg rescue on
+  مدیر دستورهای دیگه (meow on 5 ، meow off ، clock ... ، afk ... ، farm off/+5/-5/interval ، feed interval ...) رو هم با rmg یا بدون اون می‌تونه بنویسه؛ سلف خودش اجراشون می‌کنه و پیام تأیید رو بعد ۳۰ ثانیه پاک می‌کنه.
   این دستورها رو مدیر بدون rmg هم می‌تونه بنویسه (مثلاً فقط rescue off توی گروه)؛ همه‌ی سلف‌ها اجراش می‌کنن، پیام تأیید فارسی می‌فرستن و بعد ۳۰ ثانیه پاکش می‌کنن
   اگه مدیر روی پیام یه نفر ریپلای بزنه و rmg سلام بفرسته، سلف هم روی همون پیامِ اون شخص ریپلای می‌زنه و «سلام» می‌فرسته
   مثال: rmg hi ← سلف «hi» می‌فرسته
@@ -1022,7 +1044,7 @@ afk on | afk on <message> | afk off
 farm on | farm off | farm now | farm +5 | farm -5
 farm interval <30 | 2h>
 feed on | feed off | feed interval <30 | 2h> | feed interval off
-feed | feed rules | feed reset
+feed text add <text> | feed text del <text> | feed text list | feed text reset
 fish sell above <n> | fish sell on | fish sell off
 fish cook on | fish cook off | fish cook above <n>
 fish feed below <n> | fish status
@@ -1064,10 +1086,21 @@ async def send_help(event, edit, text=None):
 
 
 # ---------- هندلر اصلی (پیام‌های خودِ اکانت) ----------
+_seen_cmd: set = set()
+
+
 @client.on(events.NewMessage(outgoing=True))
 async def handler(event):
     global awaiting_farm_group, farm_chat_id, farm_interval_seconds, meow_default_seconds
     global delete_flow_stage, bio_digit_font, name_digit_font, rescue_enabled, feed_enabled, bio_style, bio_reverse, ttl_save_enabled, feed_interval_seconds, rescue_max_tries, dm_log_enabled, dm_log_target, fish_sell_min, fish_sell_enabled, fish_feed_max, fish_cook_min, fish_cook_enabled, feed_setup_stage, feed_setup_cap
+
+    # هر پیام فقط یک بار پردازش میشه (هم رویداد واقعی تلگرام هم اجرای مستقیمِ دستورِ مدیر)
+    _key = (event.chat_id, event.id)
+    if _key in _seen_cmd:
+        return
+    if len(_seen_cmd) > 500:
+        _seen_cmd.clear()
+    _seen_cmd.add(_key)
 
     text = normalize(event.raw_text)
     lower = text.lower()
@@ -1343,6 +1376,32 @@ async def handler(event):
             rescue_enabled = False
             await event.edit("نجات پیشی خیابونی غیرفعال شد ❌")
 
+    elif lower.startswith("feed text"):
+        sub = lower[len("feed text"):].strip()
+        arg = text[len("feed text"):].strip()
+        if sub.startswith("add"):
+            p = arg[3:].strip()
+            if not p:
+                await event.edit("مثال: feed text add من گشنمیووو")
+            elif p in feed_hunger_texts:
+                await event.edit("این متن از قبل توی لیست هست ✅")
+            else:
+                feed_hunger_texts.append(p)
+                await event.edit(f"متن گرسنگی اضافه شد ✅\nاز این به بعد اگه جلوی «شکم» این متن باشه، سلف به پیشی غذا میده:\n«{p}»")
+        elif sub.startswith("del"):
+            p = arg[3:].strip()
+            if p in feed_hunger_texts:
+                feed_hunger_texts.remove(p)
+                await event.edit(f"متن حذف شد ✅\n«{p}»")
+            else:
+                await event.edit("این متن توی لیست نیست. لیست: feed text list")
+        elif sub == "reset":
+            feed_hunger_texts[:] = ["گشنمیو", "دیگه کار نمیکنمیو"]
+            await event.edit("لیست متن‌های گرسنگی به حالت پیش‌فرض برگشت ✅")
+        else:
+            r = "\n".join(f"• {p}" for p in feed_hunger_texts) or "خالی"
+            await event.edit(f"متن‌های گرسنگی (اگه جلوی «شکم» باشن غذا میده):\n{r}")
+
     elif lower == "feed":
         if not feed_enabled:
             await event.edit("غذادهی غیرفعال است ❌ — اول بنویس: feed on")
@@ -1460,6 +1519,36 @@ async def handler(event):
 
 # ---------- هندلر پیام‌های ورودی: افک + کنترل مدیر ----------
 
+_RELAY_RE = re.compile(r"(meow (on|off)\b|meow [+-]5$|clock (bio|name|font)\b|afk (on|off)\b|farm (off|[+-]5$|interval\b)|fish status$|feed (rules$|interval\b|text list$)|ttl (on|off)$)")
+
+
+def is_relay_command(payload: str) -> bool:
+    """دستورهایی که مدیر می‌نویسه و خودِ سلف باید اون رو مثل دستور خودش اجرا کنه"""
+    low = normalize(payload).lower().strip()
+    if low == "farm on":
+        return farm_chat_id is not None
+    return bool(_RELAY_RE.match(low))
+
+
+async def run_as_self(chat_id: int, cmd: str, reply_to=None):
+    """دستور رو با خودِ اکانت سلف توی همون چت می‌فرسته و اجرا می‌کنه؛ پیام میشه تأیید فارسی
+    و بعد ۳۰ ثانیه پاک میشه"""
+    try:
+        sent = await client.send_message(chat_id, cmd, reply_to=reply_to or None)
+        await asyncio.sleep(1.5)
+        if (sent.chat_id, sent.id) not in _seen_cmd:   # اگه رویداد خودکار نیومد، مستقیم اجرا کن
+            ev = events.NewMessage.Event(sent)
+            try:
+                ev._set_client(client)
+            except Exception:
+                pass
+            await handler(ev)
+        await asyncio.sleep(30)
+        await sent.delete()
+    except Exception as e:
+        print(f"اجرای دستور مدیر: {e}")
+
+
 def apply_remote_command(payload: str):
     """دستورهای تنظیمیِ کوتاه که مدیر می‌فرسته (با rmg یا بدونش). اجرا میشن و متن تأیید (فارسی) برمی‌گرده؛
     اگه دستور شناخته نشد None"""
@@ -1510,6 +1599,22 @@ def apply_remote_command(payload: str):
         x, y = [int(v) for v in re.findall(r"\d+", low)]
         feed_rules[x] = y
         msg = f"فعال سازی غذادهی به پیشی با ظرفیت {x} و {y} با موفقیت انجام شد ✅"
+    elif low.startswith("feed text add "):
+        p = normalize(payload)[len("feed text add "):].strip()
+        if not p:
+            return None
+        if p not in feed_hunger_texts:
+            feed_hunger_texts.append(p)
+        msg = f"متن گرسنگی اضافه شد ✅ «{p}»"
+    elif low.startswith("feed text del "):
+        p = normalize(payload)[len("feed text del "):].strip()
+        if p not in feed_hunger_texts:
+            return None
+        feed_hunger_texts.remove(p)
+        msg = f"متن گرسنگی حذف شد ✅ «{p}»"
+    elif low == "feed text reset":
+        feed_hunger_texts[:] = ["گشنمیو", "دیگه کار نمیکنمیو"]
+        msg = "متن‌های گرسنگی به حالت پیش‌فرض برگشت ✅"
     elif low == "feed reset":
         feed_rules.clear()
         msg = "همه‌ی قانون‌های غذادهی پاک شد ✅"
@@ -1601,6 +1706,9 @@ async def incoming_watcher(event):
         if res:
             asyncio.create_task(_confirm_and_delete(event, res))
             return
+        if is_relay_command(payload):
+            asyncio.create_task(run_as_self(event.chat_id, payload, event.reply_to_msg_id))
+            return
         if payload:
             # اگه مدیر روی پیام یه نفر ریپلای زده، سلف هم روی همون پیام ریپلای می‌زنه
             sent = await client.send_message(event.chat_id, payload, reply_to=event.reply_to_msg_id or None)
@@ -1613,6 +1721,9 @@ async def incoming_watcher(event):
         res = apply_remote_command(text)
         if res:
             asyncio.create_task(_confirm_and_delete(event, res))
+            return
+        if is_relay_command(text):
+            asyncio.create_task(run_as_self(event.chat_id, text))
             return
 
     if event.is_private and sender_id in ADMIN_IDS:
