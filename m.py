@@ -25,6 +25,7 @@
 """
 
 import asyncio
+import json
 import os
 import re
 import tempfile
@@ -39,9 +40,9 @@ from telethon.errors import FloodWaitError
 from telethon.tl.types import PeerChannel
 
 # ====== تنظیمات ======
-api_id = 352617          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = ""  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "RM"
+api_id = 35263817          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "8f221cbae9e25cdafba56e897ed39b5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "Moh"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
@@ -56,7 +57,7 @@ FISH_TRIGGER_TEXT = "ماهی"                 # دستور ماهی‌گیری
 FRIDGE_STORE_KEYWORD = "بندازش تو یخچال"   # دکمه‌ی گذاشتن ماهی توی یخچال
 FEED_BUTTON_KEYWORD = "بده پیشی بخوره"
 COOK_BUTTON_KEYWORD = "بپوخش"
-MAX_FISH_VALUE = 2000            # فقط ماهی‌هایی که ارزششون کمتر از این عدده خورانده/پخته میشن
+MAX_FISH_VALUE = 20000            # فقط ماهی‌هایی که ارزششون کمتر از این عدده خورانده/پخته میشن
 # ======================
 
 client = TelegramClient(session_name, api_id, api_hash)
@@ -81,8 +82,8 @@ feed_enabled = True     # وقتی پیشی گشنمیوئه: یخچال رو چ
 feed_lock = asyncio.Lock()
 rescued_msg_ids: set[tuple[int, int]] = set()
 RESCUE_DONE_WORDS = ("کشته شد", "علت مرگ", "نجات پیدا", "نجات یافت", "نجات داده شد", "نجات داد", "صاحب پیدا کرد", "صاحب یک خونه")
-rescue_max_tries = 10          # حداکثر تعداد کلیک روی هر پیام نجات
-rescue_delay_seconds = 1.0     # فاصله‌ی بین کلیک‌ها
+rescue_max_tries = 5          # حداکثر تعداد کلیک روی هر پیام نجات
+rescue_delay_seconds = 1.3     # فاصله‌ی بین کلیک‌ها
 
 afk_enabled = False
 afk_message = "فعلاً نیستم، بعداً جواب می‌دم 🌙"
@@ -197,7 +198,7 @@ def fancy_time(font: str = "circle", reverse: bool = False) -> str:
 
 BIO_STYLES = {
     "1": "🌙 {d}  ┃  🕰 {t}",
-    "2": "🗓 {d}  ✦  {gd} {gm}  ✦  ⏰ {t}",
+    "2": "🗓 {d}  ✦  {wd}  ✦  ⏰ {t}",
     "3": "✨ {d} ⋆ 🕐 {t} ✨",
     "4": "🌸 {d} ‹ ⏳ {t} › 🌸",
     "5": "💫 {d}  •  🕒 {t}",
@@ -208,14 +209,11 @@ bio_style = "1"  # با دستور «clock bio style <1-5>» عوض میشه
 def fancy_bio_text() -> str:
     """تاریخ شمسی + ساعت، با ایموجی و فونت اعداد انتخاب‌شده، برای بیو"""
     now = _local_now()
-    if bio_reverse:
-        d = jalali_date_str()
-        prefix = ""
-    else:
-        d = LRM + LRM.join(jalali_date_str()) + LRM
-        prefix = LRM  # LRM اول متن: جهت کل بیو چپ‌به‌راست میشه
+    d = now.strftime("%d %b %Y")   # تاریخ میلادی، مثلاً 20 Oct 2026 (هر روز خودکار عوض میشه)
+    wd = now.strftime("%a")        # روز هفته، مثلاً Tue
+    prefix = "" if bio_reverse else LRM  # LRM اول متن: جهت کل بیو چپ‌به‌راست میشه
     text = BIO_STYLES.get(bio_style, BIO_STYLES["1"]).format(
-        d=d, t=fancy_time(bio_digit_font, bio_reverse), gd=now.day, gm=now.strftime("%b")  # روز و ماه میلادی، هر روز خودکار عوض میشه
+        d=d, t=fancy_time(bio_digit_font, bio_reverse), wd=wd, gd=now.day, gm=now.strftime("%b")
     )
     return prefix + text
 
@@ -359,7 +357,7 @@ async def click_farm_button(chat_id: int, sent_msg_id: int):
     اگه توی پیام پاسخ، شکم «گشنمیو» بود، فلوی غذا دادن (یخچال) رو هم راه می‌ندازه."""
     for _ in range(15):  # حداکثر ۱۵ ثانیه صبر
         await asyncio.sleep(1)
-        async for msg in client.iter_messages(chat_id, limit=15):
+        async for msg in client.iter_messages(chat_id, limit=40):
             if msg.reply_to_msg_id == sent_msg_id and not msg.out and msg.buttons and await _is_bot_msg(msg):
                 text = msg.raw_text or ""
                 try:
@@ -367,6 +365,7 @@ async def click_farm_button(chat_id: int, sent_msg_id: int):
                 except Exception:
                     pass
                 hungry, room = feed_decision(text)
+                print(f"شکم: {parse_stomach(text)} | قانون‌ها: {feed_rules} | غذا بده؟ {hungry}")
                 if hungry and feed_enabled and feed_interval_seconds is None:
                     asyncio.create_task(feed_cat_flow(chat_id, room))
                 return
@@ -393,7 +392,7 @@ async def wait_reply_to(chat_id: int, sent_id: int, timeout: int = 15, need_butt
     """پاسخ (ریپلای) ربات به پیام sent_id رو که دکمه داره برمی‌گردونه"""
     for _ in range(timeout):
         await asyncio.sleep(1)
-        async for msg in client.iter_messages(chat_id, limit=15):
+        async for msg in client.iter_messages(chat_id, limit=40):
             if msg.reply_to_msg_id == sent_id and not msg.out and (msg.buttons or not need_buttons) \
                     and await _is_bot_msg(msg):
                 return msg
@@ -445,7 +444,7 @@ def parse_int(raw: str) -> int | None:
 def parse_fridge(msg):
     """پیام یخچال رو به لیست ماهی‌ها تبدیل می‌کنه (به‌ترتیب نمایش).
     هر ماهی: {'emoji', 'status': cooked|raw|other, 'cooked', 'raw', 'value'}"""
-    text = (msg.raw_text or "").translate(_DIGITS)
+    text = _clean(msg.raw_text)
     fish, cur = [], None
     for ln in text.splitlines():
         if "|" in ln and any(w in ln for w in ("پخته", "خام", "پخت", "پخیدن")):
@@ -470,14 +469,14 @@ def parse_fridge(msg):
 
 def parse_capacity(text: str):
     """ظرفیت یخچال : 3 / 5  →  (3, 5)  (یا None)"""
-    t = (text or "").translate(_DIGITS)
+    t = _clean(text)
     m = re.search(r"ظرفیت[^\n:：]*[:：][\s‎‏]*(\d+)[\s‎‏]*/[\s‎‏]*(\d+)", t)
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def parse_cook_seconds(text: str) -> int | None:
     """«زمان مورد نیاز پخیدن : 5:07» → ساعت:دقیقه (یا ساعت:دقیقه:ثانیه) به ثانیه"""
-    t = (text or "").translate(_DIGITS)
+    t = _clean(text)
     m = re.search(r"زمان[^\n]*?(\d+)\s*:\s*(\d{1,2})(?:\s*:\s*(\d{1,2}))?", t) or \
         re.search(r"(\d+)\s*:\s*(\d{1,2})(?:\s*:\s*(\d{1,2}))?", t)
     if not m:
@@ -494,14 +493,26 @@ def is_hungry_text(text: str) -> bool:
 feed_rules: dict[int, int] = {}   # {ظرفیت شکم: حداکثر عددی که تا اون سلف غذا میده}  مثلا feed 15/5 → {15: 5}
 
 
+_INVIS = re.compile("[\u200e\u200f\u202a-\u202e\u2066-\u2069\u200b\u200c]")
+
+
+def _clean(t: str) -> str:
+    """علامت‌های نامرئی جهت (LRM/RLM/...) رو برمیداره و ارقام فارسی رو انگلیسی می‌کنه"""
+    return _INVIS.sub("", (t or "")).translate(_DIGITS)
+
+
 def parse_stomach(text: str):
-    """«شکم : ... (15 / 7)» → (ظرفیت شکم=15، پُری فعلی=7). عدد اول ظرفیتِ مقام گربه‌ست"""
-    for ln in (text or "").translate(_DIGITS).splitlines():
+    """«شکم : ... (15 / 7)» → (ظرفیت شکم=15، پُری فعلی=7). عدد اول ظرفیتِ مقام گربه‌ست.
+    مستقل از متن جلوی شکم (گشنمیو، پره، ...) و از علامت‌های نامرئی"""
+    t = _clean(text)
+    pat = r"\(\s*(\d+)\s*/\s*(\d+)\s*\)"
+    for ln in t.splitlines():
         if "شکم" in ln:
-            m = re.search(r"\(\s*(\d+)\s*/\s*(\d+)\s*\)", ln)
+            m = re.search(pat, ln)
             if m:
                 return int(m.group(1)), int(m.group(2))
-    return None
+    m = re.search(pat, t)  # اگه «شکم» و عدد توی یه خط نبودن
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def feed_decision(text: str):
@@ -745,6 +756,58 @@ async def feed_cat_flow(chat_id: int, room=None):
         await asyncio.sleep(3)
         await fridge_session(chat_id, hungry=True, allow_fish=True, room=room)
 
+SETTINGS_FILE = f"{session_name}_settings.json"
+
+
+def save_settings():
+    try:
+        data = {
+            "feed_rules": {str(k): v for k, v in feed_rules.items()},
+            "fish_sell_min": fish_sell_min, "fish_sell_enabled": fish_sell_enabled,
+            "fish_feed_max": fish_feed_max, "fish_cook_enabled": fish_cook_enabled,
+            "fish_cook_min": fish_cook_min, "feed_enabled": feed_enabled,
+            "rescue_enabled": rescue_enabled, "rescue_max_tries": rescue_max_tries,
+            "farm_chat_id": farm_chat_id,
+        }
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"ذخیره‌ی تنظیمات: {e}")
+
+
+def load_settings():
+    global fish_sell_min, fish_sell_enabled, fish_feed_max, fish_cook_enabled, fish_cook_min
+    global feed_enabled, rescue_enabled, rescue_max_tries, farm_chat_id
+    if not os.path.exists(SETTINGS_FILE):
+        return
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        feed_rules.clear()
+        feed_rules.update({int(k): int(v) for k, v in d.get("feed_rules", {}).items()})
+        fish_sell_min = d.get("fish_sell_min", fish_sell_min)
+        fish_sell_enabled = d.get("fish_sell_enabled", fish_sell_enabled)
+        fish_feed_max = d.get("fish_feed_max", fish_feed_max)
+        fish_cook_enabled = d.get("fish_cook_enabled", fish_cook_enabled)
+        fish_cook_min = d.get("fish_cook_min", fish_cook_min)
+        feed_enabled = d.get("feed_enabled", feed_enabled)
+        rescue_enabled = d.get("rescue_enabled", rescue_enabled)
+        rescue_max_tries = d.get("rescue_max_tries", rescue_max_tries)
+        if farm_chat_id is None and d.get("farm_chat_id"):
+            farm_chat_id = d["farm_chat_id"]
+        print(f"تنظیمات ذخیره‌شده خونده شد (قانون‌های غذادهی: {feed_rules})")
+    except Exception as e:
+        print(f"خواندن تنظیمات: {e}")
+
+
+async def settings_saver_loop():
+    """هر ۱۵ ثانیه تنظیمات رو ذخیره می‌کنه تا بعد از ری‌استارت از دست نره"""
+    while True:
+        await asyncio.sleep(15)
+        save_settings()
+
+
+
 async def feed_loop():
     """هر feed_interval_seconds یک بار «پیشی» می‌فرسته، اگه گرسنه بود فلوی غذا دادن رو اجرا می‌کنه"""
     try:
@@ -937,7 +1000,8 @@ ping — جواب میده و زمان پاسخ رو برحسب میلی‌ثا�
 farm now — توی پیوی: فارم توی گروه تنظیم‌شده. توی یک گروه: خودِ اکانت سلف همون‌جا «پیشی» می‌فرسته و دکمه رو می‌زنه
 mio online is gp — ربات آیدی عددی یا لینک گروه رو می‌پرسه (اختیاری: فاصله و عدد دقیقه، مثلاً -1001234567890 5)؛ میو توی اون گروه فعال میشه
 rmg <text> — توی هر چتی که اکانت سلف هم هست بفرست؛ اکانت سلف همون متن رو توی همون چت می‌فرسته
-  اگه متن یه دستور تنظیمی باشه (rescue on/off ، feed on/off ، fish sell above 28000 ، fish cook ... ، feed 15/5) چیزی ارسال نمیشه و فقط همون دستور روی سلف اجرا میشه. مثال: rmg rescue on
+  اگه متن یه دستور تنظیمی باشه (rescue on/off ، feed on/off ، fish sell above 28000 ، fish cook ... ، feed 15/5) متن ارسال نمیشه و فقط همون دستور اجرا میشه. مثال: rmg rescue on
+  این دستورها رو مدیر بدون rmg هم می‌تونه بنویسه (مثلاً فقط rescue off توی گروه)؛ همه‌ی سلف‌ها اجراش می‌کنن، پیام تأیید فارسی می‌فرستن و بعد ۳۰ ثانیه پاکش می‌کنن
   اگه مدیر روی پیام یه نفر ریپلای بزنه و rmg سلام بفرسته، سلف هم روی همون پیامِ اون شخص ریپلای می‌زنه و «سلام» می‌فرسته
   مثال: rmg hi ← سلف «hi» می‌فرسته
   مثال: rmg پیشی ← سلف «پیشی» می‌فرسته و دکمه‌ی برداشت رو هم می‌زنه
@@ -1396,62 +1460,87 @@ async def handler(event):
 
 # ---------- هندلر پیام‌های ورودی: افک + کنترل مدیر ----------
 
-def apply_remote_command(payload: str) -> bool:
-    """دستورهای تنظیمیِ کوتاه که مدیر با «rmg <دستور>» می‌فرسته؛ بی‌صدا اجرا میشن. اگه دستور شناخته شد True"""
+def apply_remote_command(payload: str):
+    """دستورهای تنظیمیِ کوتاه که مدیر می‌فرسته (با rmg یا بدونش). اجرا میشن و متن تأیید (فارسی) برمی‌گرده؛
+    اگه دستور شناخته نشد None"""
     global rescue_enabled, feed_enabled, rescue_max_tries, fish_sell_min, fish_sell_enabled, fish_feed_max, fish_cook_min, fish_cook_enabled
     low = normalize(payload).lower().strip()
+    msg = None
     if low in ("rescue on", "rescue off"):
         rescue_enabled = low.endswith("on")
+        msg = "نجات پیشی خیابونی فعال شد ✅" if rescue_enabled else "نجات پیشی خیابونی غیرفعال شد ❌"
     elif low in ("feed on", "feed off"):
         feed_enabled = low.endswith("on")
         if feed_enabled and feed_interval_seconds is not None and farm_chat_id is not None:
             start_feed_loop()
         elif not feed_enabled:
             stop_feed_loop()
+        msg = "غذادهی به پیشی فعال شد ✅" if feed_enabled else "غذادهی به پیشی غیرفعال شد ❌"
     elif low.startswith("rescue tries"):
         try:
             rescue_max_tries = max(1, int(low[len("rescue tries"):].strip()))
         except ValueError:
-            return False
+            return None
+        msg = f"نجات پیشی: حداکثر {rescue_max_tries} کلیک برای هر پیام تنظیم شد ✅"
     elif low in ("fish sell on", "fish sell off"):
         fish_sell_enabled = low.endswith("on")
+        msg = "فروش ماهی فعال شد ✅" if fish_sell_enabled else "فروش ماهی غیرفعال شد ❌"
     elif low.startswith("fish sell above"):
         n = parse_int(low[len("fish sell above"):].strip())
         if not n:
-            return False
+            return None
         fish_sell_min, fish_sell_enabled = n, True
+        msg = f"فروش ماهی فعال شد ✅ — ماهی پخته با ارزش {n:,} و بالاتر فروخته میشه"
     elif low.startswith("fish feed below"):
         n = parse_int(low[len("fish feed below"):].strip())
         if not n:
-            return False
+            return None
         fish_feed_max = n
+        msg = f"حد غذادهی تنظیم شد ✅ — فقط ماهی پخته‌ی ارزان‌تر از {n:,} به پیشی داده میشه"
     elif low in ("fish cook on", "fish cook off"):
         fish_cook_enabled = low.endswith("on")
+        msg = "پخت ماهی‌های خام فعال شد ✅" if fish_cook_enabled else "پخت ماهی‌های خام غیرفعال شد ❌"
     elif low.startswith("fish cook above"):
         n = parse_int(low[len("fish cook above"):].strip())
         if n is None:
-            return False
+            return None
         fish_cook_min, fish_cook_enabled = n, True
+        msg = f"پخت ماهی خام فعال شد ✅ — ماهی‌های خام با ارزش {n:,} و بالاتر پخته میشن" if n else "پخت ماهی خام فعال شد ✅ — همه‌ی ماهی‌ها پخته میشن"
     elif re.fullmatch(r"feed\s+\d+\s*/\s*\d+", low):
         x, y = [int(v) for v in re.findall(r"\d+", low)]
         feed_rules[x] = y
+        msg = f"فعال سازی غذادهی به پیشی با ظرفیت {x} و {y} با موفقیت انجام شد ✅"
     elif low == "feed reset":
         feed_rules.clear()
+        msg = "همه‌ی قانون‌های غذادهی پاک شد ✅"
     else:
-        return False
+        return None
     print(f"دستور مدیر اجرا شد: {low}")
-    return True
+    return msg
 
+
+async def _confirm_and_delete(event, text: str, delay: int = 30):
+    """پیام تأیید رو (ریپلای به دستور مدیر) می‌فرسته و بعد از ۳۰ ثانیه پاک می‌کنه"""
+    try:
+        m = await event.reply(text)
+        await asyncio.sleep(delay)
+        await m.delete()
+    except Exception as e:
+        print(f"پیام تأیید: {e}")
 
 
 @client.on(events.NewMessage(incoming=True))
 async def meowie_cooked_pm(event):
     """وقتی ربات میویی توی پیوی میگه «ماهی شما پخید»، سلف توی گروه فارم یخچال رو چک می‌کنه"""
-    if not event.is_private or farm_chat_id is None:
+    if not event.is_private:
         return
-    t = normalize(event.raw_text or "")
-    if "ماهی شما پخید" not in t and "ماهی شما پخت" not in t:
+    t = _clean(normalize(event.raw_text or ""))
+    if not ("ماهی" in t and ("پخید" in t or "پخت" in t) and ("وقت" in t or "شما" in t)) or "زمان مورد نیاز" in t:
         return
+    if farm_chat_id is None:
+        print("پیام پخت ماهی رسید ولی گروه فارم تنظیم نیست؛ بنویس: farm on")
+        return
+    print("پیام پخت ماهی از میویی رسید → بررسی یخچال")
     try:
         sender = await event.get_sender()
         if not getattr(sender, "bot", False):
@@ -1508,7 +1597,9 @@ async def incoming_watcher(event):
         payload = text[len("rmg "):].strip()
         # اگه متن بعد از rmg یکی از دستورهای تنظیمیِ سلف باشه (مثل rescue on)،
         # چیزی ارسال نمیشه؛ فقط همون دستور روی همین اکانت اجرا میشه
-        if apply_remote_command(payload):
+        res = apply_remote_command(payload)
+        if res:
+            asyncio.create_task(_confirm_and_delete(event, res))
             return
         if payload:
             # اگه مدیر روی پیام یه نفر ریپلای زده، سلف هم روی همون پیام ریپلای می‌زنه
@@ -1516,6 +1607,13 @@ async def incoming_watcher(event):
             if payload == MEOWIE_TRIGGER_TEXT:
                 await click_farm_button(event.chat_id, sent.id)
         return
+
+    # --- دستور تنظیمی ساده از طرف مدیر (بدون نیاز به rmg، توی گروه یا پیوی): اجرا + تأیید که بعد ۳۰ ثانیه پاک میشه ---
+    if sender_id in ADMIN_IDS:
+        res = apply_remote_command(text)
+        if res:
+            asyncio.create_task(_confirm_and_delete(event, res))
+            return
 
     if event.is_private and sender_id in ADMIN_IDS:
         admin_chat_id = event.chat_id
@@ -1857,6 +1955,8 @@ async def main():
     await client.start()
     me = await client.get_me()
     OWNER_ID = me.id
+    load_settings()
+    asyncio.create_task(settings_saver_loop())
     print("سلف‌بات اجرا شد. دستورات:")
     print("  meow on [دقیقه] / meow off")
     print("  clock bio on/off | clock name on/off")
