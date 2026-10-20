@@ -29,6 +29,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from datetime import datetime, timezone, timedelta
 
 import jdatetime  # برای تبدیل درست تاریخ شمسی -> نصب: pip install jdatetime
@@ -40,14 +41,14 @@ from telethon.errors import FloodWaitError
 from telethon.tl.types import PeerChannel
 
 # ====== تنظیمات ======
-api_id = 38302455          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "c4646ac93fcbc703948bf74e76422d5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "389"
+api_id = 38633798          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "0be9bd92e224dec99c70cbe48d9ab542"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "zey"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
 
-ADMIN_IDS: list[int] = [5888377320]        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
+ADMIN_IDS: list[int] = [8865852660]        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
 
 MEOWIE_TRIGGER_TEXT = "پیشی"      # پیامی که برای فارم به گروه فرستاده میشه
 MEOWIE_BUTTON_KEYWORD = "برداشت میو پوینت ها"  # عبارت کامل دکمه، تا با دکمه‌های دیگه (مثلاً بانکی) اشتباه گرفته نشه
@@ -57,7 +58,7 @@ FISH_TRIGGER_TEXT = "ماهی"                 # دستور ماهی‌گیری
 FRIDGE_STORE_KEYWORD = "بندازش تو یخچال"   # دکمه‌ی گذاشتن ماهی توی یخچال
 FEED_BUTTON_KEYWORD = "بده پیشی بخوره"
 COOK_BUTTON_KEYWORD = "بپوخش"
-MAX_FISH_VALUE = 20000            # فقط ماهی‌هایی که ارزششون کمتر از این عدده خورانده/پخته میشن
+MAX_FISH_VALUE = 2000            # فقط ماهی‌هایی که ارزششون کمتر از این عدده خورانده/پخته میشن
 # ======================
 
 client = TelegramClient(session_name, api_id, api_hash)
@@ -74,7 +75,6 @@ clock_name_task: asyncio.Task | None = None
 TELEGRAM_SERVICE_IDS = (777000, 42777, 333000, 429000, 93372553, 178220800)  # اکانت‌های رسمی تلگرام
 dm_log_enabled = False          # ذخیره‌ی پیام‌های پیوی توی کانال
 dm_log_target = None            # کانال مقصد (با «log channel <id|link>» تنظیم میشه)
-ttl_save_enabled = True  # ذخیره‌ی عکس/ویدیوی نابودشونده توی Saved Messages
 feed_interval_seconds: float | None = None   # None = غذا دادن همراه فارم؛ عدد = چک جدا هر چند ثانیه
 feed_task: asyncio.Task | None = None
 rescue_enabled = True   # کلیک خودکار روی «نجات پیشی خیابونی»
@@ -83,7 +83,7 @@ feed_lock = asyncio.Lock()
 rescued_msg_ids: set[tuple[int, int]] = set()
 RESCUE_DONE_WORDS = ("کشته شد", "علت مرگ", "نجات پیدا", "نجات یافت", "نجات داده شد", "نجات داد", "صاحب پیدا کرد", "صاحب یک خونه")
 rescue_max_tries = 10          # حداکثر تعداد کلیک روی هر پیام نجات
-rescue_delay_seconds = 1.2     # فاصله‌ی بین کلیک‌ها
+rescue_delay_seconds = 3.0     # فاصله‌ی بین کلیک‌ها
 
 afk_enabled = False
 afk_message = "فعلاً نیستم، بعداً جواب می‌دم 🌙"
@@ -425,6 +425,24 @@ feed_setup_stage = None              # فلوی گفتگویی دستور feed: 
 feed_setup_cap = None
 cook_timers: dict[int, asyncio.Task] = {}
 
+# ماهی‌گیری: هر ۴۵ دقیقه یک‌بار میشه ماهی گرفت
+FISH_COOLDOWN_SECONDS = 45 * 60
+fish_auto_enabled = True                      # ماهی‌گیری خودکار هر ۴۵ دقیقه (توی گروه فارم)
+fish_interval_seconds = FISH_COOLDOWN_SECONDS  # فاصله‌ی ماهی‌گیری خودکار (حداقل ۴۵ دقیقه)
+last_fish_ts = 0.0                            # آخرین باری که ماهی با موفقیت گرفته و توی یخچال انداخته شد
+last_fish_try_ts = 0.0                        # آخرین تلاش (برای جلوگیری از اسپم)
+next_fish_due = 0.0
+fish_task: asyncio.Task | None = None
+
+
+def fish_wait_left() -> float:
+    """چند ثانیه تا تموم شدن کولداون ۴۵ دقیقه‌ای ماهی‌گیری مونده (۰ = آماده)"""
+    return max(0.0, FISH_COOLDOWN_SECONDS + 5 - (time.time() - last_fish_ts))
+
+
+def fish_ready() -> bool:
+    return fish_wait_left() <= 0 and (time.time() - last_fish_try_ts) >= 180
+
 
 def parse_int(raw: str) -> int | None:
     """عدد با ویرگول یا پسوند k/m: 50000 ، 50,000 ، 50k ، 1.5m"""
@@ -679,6 +697,8 @@ async def cook_fish(chat_id: int, msg_id: int, f):
 
 async def catch_and_store_fish(chat_id: int) -> bool:
     """«ماهی» می‌فرسته و روی «بندازش تو یخچال» می‌زنه. اگه انجام شد True برمی‌گردونه"""
+    global last_fish_ts, last_fish_try_ts
+    last_fish_try_ts = time.time()
     sent = await client.send_message(chat_id, FISH_TRIGGER_TEXT)
     msg = await wait_reply_to(chat_id, sent.id)
     if not msg:
@@ -687,10 +707,41 @@ async def catch_and_store_fish(chat_id: int) -> bool:
     for b in _flat_buttons(msg):
         if b.text and FRIDGE_STORE_KEYWORD in b.text:
             ok = await safe_click(b)
+            if ok:
+                last_fish_ts = time.time()
             print("fish: ماهی توی یخچال انداخته شد" if ok else "fish: کلیک ناموفق")
             return ok
     print("fish: دکمه‌ی «بندازش تو یخچال» پیدا نشد")
     return False
+
+
+async def fish_now():
+    """یک نشست یخچال + ماهی‌گیری (اگه کولداون ۴۵ دقیقه تموم شده باشه)"""
+    if farm_chat_id is None:
+        return
+    async with feed_lock:
+        await fridge_session(farm_chat_id, hungry=False, allow_fish=True)
+
+
+async def fish_loop():
+    """هر ۴۵ دقیقه (و ۳۰ ثانیه) یک‌بار: یخچال رو چک می‌کنه و اگه جا داشت ماهی می‌گیره"""
+    global next_fish_due
+    try:
+        while True:
+            await asyncio.sleep(30)
+            if not (fish_auto_enabled and farm_chat_id is not None):
+                next_fish_due = 0.0   # وقتی روشن شد، سریع اجرا بشه
+                continue
+            now = time.time()
+            if now < next_fish_due:
+                continue
+            next_fish_due = now + fish_interval_seconds + 30
+            try:
+                await fish_now()
+            except Exception as e:
+                print(f"خطا توی ماهی‌گیری خودکار: {e}")
+    except asyncio.CancelledError:
+        pass
 
 
 def schedule_post_cook(chat_id: int, seconds: int):
@@ -764,7 +815,7 @@ async def fridge_session(chat_id: int, hungry: bool, allow_fish: bool, room=None
                     return
 
             # ۴) یخچال پر نیست → ماهی بگیر
-            if allow_fish and (cap is None or cap[0] != cap[1]):
+            if allow_fish and fish_ready() and (cap is None or cap[0] != cap[1]):
                 allow_fish = False
                 if await catch_and_store_fish(chat_id):
                     await asyncio.sleep(2)
@@ -793,6 +844,7 @@ def save_settings():
             "fish_cook_min": fish_cook_min, "feed_enabled": feed_enabled,
             "rescue_enabled": rescue_enabled, "rescue_max_tries": rescue_max_tries,
             "farm_chat_id": farm_chat_id, "feed_hunger_texts": feed_hunger_texts,
+            "fish_auto_enabled": fish_auto_enabled, "fish_interval_seconds": fish_interval_seconds,
         }
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -803,6 +855,7 @@ def save_settings():
 def load_settings():
     global fish_sell_min, fish_sell_enabled, fish_feed_max, fish_cook_enabled, fish_cook_min
     global feed_enabled, rescue_enabled, rescue_max_tries, farm_chat_id
+    global fish_auto_enabled, fish_interval_seconds
     if not os.path.exists(SETTINGS_FILE):
         return
     try:
@@ -818,6 +871,8 @@ def load_settings():
         feed_enabled = d.get("feed_enabled", feed_enabled)
         rescue_enabled = d.get("rescue_enabled", rescue_enabled)
         rescue_max_tries = d.get("rescue_max_tries", rescue_max_tries)
+        fish_auto_enabled = d.get("fish_auto_enabled", fish_auto_enabled)
+        fish_interval_seconds = max(FISH_COOLDOWN_SECONDS, d.get("fish_interval_seconds", fish_interval_seconds))
         if d.get("feed_hunger_texts"):
             feed_hunger_texts[:] = d["feed_hunger_texts"]
         if farm_chat_id is None and d.get("farm_chat_id"):
@@ -998,16 +1053,17 @@ fish sell off / fish sell on — خاموش/روشن کردن فروش
 fish feed below 2000 — ماهی پخته‌ی ارزش < این عدد به پیشی داده میشه (و ماهی خام زیر این عدد پخته میشه)
 fish cook on / fish cook off — پخت همه‌ی ماهی‌های خام (پیش‌فرض روشن)
 fish cook above 5000 — فقط ماهی خام با ارزش ≥ این عدد پخته بشه (fish cook above 0 = همه)
+fish auto on / fish auto off — ماهی‌گیری خودکار هر ۴۵ دقیقه توی گروه فارم (پیش‌فرض روشن)؛ اگه یخچال جا داشته باشه «ماهی» می‌فرسته و می‌ندازه تو یخچال
+fish interval 60 — فاصله‌ی ماهی‌گیری خودکار (حداقل ۴۵ دقیقه، چون ماهی‌گیری هر ۴۵ دقیقه یک‌بار ممکنه)
+fish now — همین الان ماهی بگیر (اگه کولداون ۴۵ دقیقه تموم شده باشه)
 fish status — نمایش قوانین فعلی
 (ماهی‌هایی که ارزششون بین این دو عدده، نه فروخته میشن نه خورانده میشن)
-
-🔒 ذخیره‌ی عکس/ویدیوی نابودشونده
-ttl on / ttl off — هر عکس/ویدیو/ویس سکرت (تایمردار یا یک‌بار‌مصرف) که کسی توی پیوی برات بفرسته، خودکار توی Saved Messages ذخیره میشه (پیش‌فرض روشن)
 
 📥 ذخیره‌ی پیام‌های پیوی توی کانال
 log channel <id|link> — کانال مقصد رو تنظیم و روشن می‌کنه (اکانت باید عضو/ادمین کانال باشه)
 log on / log off — روشن/خاموش
-(هر چیزی که کسی توی پیوی برات بفرسته — متن، ویس، عکس، ویدیو، فایل، استیکر، و حتی مدیای نابودشونده — اول خودش توی اون کانال فرستاده میشه و زیرش «پیام از:» با اسم، یوزرنیم، آیدی عددی و ساعت ارسال. هر پیوی‌ای ذخیره میشه، حتی از اکانت‌های پرمیوم، تیک‌دار و ربات‌ها؛ فقط پیام‌هایی که خودِ تلگرام می‌فرسته (مثل کدهای ورود) نادیده گرفته میشن)
+(هر چیزی که کسی توی پیوی برات بفرسته — متن، ویس، عکس، ویدیو، فایل، استیکر — اول خودش توی اون کانال فرستاده میشه و زیرش «پیام از:» با اسم، یوزرنیم، آیدی عددی و ساعت ارسال. هر پیوی‌ای ذخیره میشه، حتی از اکانت‌های پرمیوم، تیک‌دار و ربات‌ها؛ فقط پیام‌هایی که خودِ تلگرام می‌فرسته (مثل کدهای ورود) نادیده گرفته میشن)
+✏️ پیام‌های ویرایش‌شده هم توی همون کانال فرستاده میشن، با متن «قبل از ویرایش» و «بعد از ویرایش» و اطلاعات فرستنده
 
 🗑 حذف پیام‌ها
 clean all — روی یکی از پیام‌های خودت ریپلای کن و بنویس؛ همه‌ی پیام‌های خودت توی اون چت پاک میشه
@@ -1056,9 +1112,9 @@ feed text add <text> | feed text del <text> | feed text list | feed text reset
 fish sell above <n> | fish sell on | fish sell off
 fish cook on | fish cook off | fish cook above <n>
 fish feed below <n> | fish status
+fish auto on | fish auto off | fish interval <min> | fish now
 rescue on | rescue off | rescue tries <n>
 log channel <id|link> | log on | log off
-ttl on | ttl off
 clean all | delete messages
 help | guide
 
@@ -1100,7 +1156,8 @@ _seen_cmd: set = set()
 @client.on(events.NewMessage(outgoing=True))
 async def handler(event):
     global awaiting_farm_group, farm_chat_id, farm_interval_seconds, meow_default_seconds
-    global delete_flow_stage, bio_digit_font, name_digit_font, rescue_enabled, feed_enabled, bio_style, bio_reverse, ttl_save_enabled, feed_interval_seconds, rescue_max_tries, dm_log_enabled, dm_log_target, fish_sell_min, fish_sell_enabled, fish_feed_max, fish_cook_min, fish_cook_enabled, feed_setup_stage, feed_setup_cap
+    global delete_flow_stage, bio_digit_font, name_digit_font, rescue_enabled, feed_enabled, bio_style, bio_reverse, feed_interval_seconds, rescue_max_tries, dm_log_enabled, dm_log_target, fish_sell_min, fish_sell_enabled, fish_feed_max, fish_cook_min, fish_cook_enabled, feed_setup_stage, feed_setup_cap
+    global fish_auto_enabled, fish_interval_seconds
 
     # هر پیام فقط یک بار پردازش میشه (هم رویداد واقعی تلگرام هم اجرای مستقیمِ دستورِ مدیر)
     _key = (event.chat_id, event.id)
@@ -1311,25 +1368,37 @@ async def handler(event):
             dm_log_enabled = False
             await event.edit("ذخیره‌ی پیوی غیرفعال شد ❌")
 
-    elif lower == "ttl on":
-        if ttl_save_enabled:
-            await event.edit("ذخیره‌ی فایل نابودشونده فعال می‌باشد ✅ (از قبل روشن بود)")
+    elif lower in ("fish auto on", "fish auto off"):
+        fish_auto_enabled = lower.endswith("on")
+        if fish_auto_enabled:
+            await event.edit(f"ماهی‌گیری خودکار فعال شد ✅ — هر {fish_interval_seconds/60:g} دقیقه یک‌بار (توی گروه فارم)")
         else:
-            ttl_save_enabled = True
-            await event.edit("ذخیره‌ی فایل نابودشونده فعال شد ✅")
+            await event.edit("ماهی‌گیری خودکار غیرفعال شد ❌")
 
-    elif lower == "ttl off":
-        if not ttl_save_enabled:
-            await event.edit("ذخیره‌ی فایل نابودشونده غیرفعال می‌باشد ❌ (از قبل خاموش بود)")
+    elif lower.startswith("fish interval"):
+        seconds = parse_duration_seconds(text[len("fish interval"):].strip())
+        if seconds is None or seconds < FISH_COOLDOWN_SECONDS:
+            await event.edit("حداقل فاصله ۴۵ دقیقه‌ست. مثال: fish interval 45  یا  fish interval 1h")
         else:
-            ttl_save_enabled = False
-            await event.edit("ذخیره‌ی فایل نابودشونده غیرفعال شد ❌")
+            fish_interval_seconds = seconds
+            await event.edit(f"فاصله‌ی ماهی‌گیری روی {seconds/60:g} دقیقه تنظیم شد ✅")
+
+    elif lower == "fish now":
+        if farm_chat_id is None:
+            await event.edit("هنوز گروه فارم تنظیم نشده. بنویس: farm on")
+        else:
+            left = fish_wait_left()
+            if left > 0:
+                await event.edit(f"هنوز {left/60:.0f} دقیقه تا ماهی‌گیری بعدی مونده ⏳")
+            else:
+                await event.edit("در حال ماهی‌گیری... 🎣")
+                asyncio.create_task(fish_now())
 
     elif lower == "fish status":
         sell = f"فروش ماهی پخته با ارزش {fish_sell_min:,} و بالاتر" if fish_sell_enabled else "فروش خاموش است"
         cook = (f"پخت ماهی خام: فعال (از ارزش {fish_cook_min:,})" if fish_cook_min else "پخت ماهی خام: فعال (همه‌ی ماهی‌ها)") if fish_cook_enabled else "پخت ماهی خام: غیرفعال"
         rules = "، ".join(f"{k}/{v}" for k, v in sorted(feed_rules.items())) or "هیچ‌کدام"
-        await event.edit(f"🐟 وضعیت ماهی‌ها\n• {cook}\n• {sell}\n• غذا دادن فقط با ماهی پخته‌ی ارزان‌تر از {fish_feed_max:,}\n• قانون‌های غذادهی (ظرفیت/پُری): {rules}")
+        await event.edit(f"🐟 وضعیت ماهی‌ها\n• {cook}\n• {sell}\n• غذا دادن فقط با ماهی پخته‌ی ارزان‌تر از {fish_feed_max:,}\n• قانون‌های غذادهی (ظرفیت/پُری): {rules}\n• ماهی‌گیری خودکار: {'فعال، هر ' + format(fish_interval_seconds/60, 'g') + ' دقیقه' if fish_auto_enabled else 'غیرفعال'}")
 
     elif lower in ("fish cook on", "fish cook off"):
         fish_cook_enabled = lower.endswith("on")
@@ -1527,7 +1596,7 @@ async def handler(event):
 
 # ---------- هندلر پیام‌های ورودی: افک + کنترل مدیر ----------
 
-_RELAY_RE = re.compile(r"(meow (on|off)\b|meow [+-]5$|clock (bio|name|font)\b|afk (on|off)\b|farm (off|[+-]5$|interval\b)|fish status$|feed (rules$|interval\b|text list$)|ttl (on|off)$)")
+_RELAY_RE = re.compile(r"(meow (on|off)\b|meow [+-]5$|clock (bio|name|font)\b|afk (on|off)\b|farm (off|[+-]5$|interval\b)|fish status$|feed (rules$|interval\b|text list$))")
 
 
 def is_relay_command(payload: str) -> bool:
@@ -1560,7 +1629,7 @@ async def run_as_self(chat_id: int, cmd: str, reply_to=None):
 def apply_remote_command(payload: str):
     """دستورهای تنظیمیِ کوتاه که مدیر می‌فرسته (با rmg یا بدونش). اجرا میشن و متن تأیید (فارسی) برمی‌گرده؛
     اگه دستور شناخته نشد None"""
-    global rescue_enabled, feed_enabled, rescue_max_tries, fish_sell_min, fish_sell_enabled, fish_feed_max, fish_cook_min, fish_cook_enabled
+    global rescue_enabled, feed_enabled, rescue_max_tries, fish_sell_min, fish_sell_enabled, fish_feed_max, fish_cook_min, fish_cook_enabled, fish_auto_enabled, fish_interval_seconds
     low = normalize(payload).lower().strip()
     msg = None
     if low in ("rescue on", "rescue off"):
@@ -1603,6 +1672,15 @@ def apply_remote_command(payload: str):
             return None
         fish_cook_min, fish_cook_enabled = n, True
         msg = f"پخت ماهی خام فعال شد ✅ — ماهی‌های خام با ارزش {n:,} و بالاتر پخته میشن" if n else "پخت ماهی خام فعال شد ✅ — همه‌ی ماهی‌ها پخته میشن"
+    elif low in ("fish auto on", "fish auto off"):
+        fish_auto_enabled = low.endswith("on")
+        msg = "ماهی‌گیری خودکار فعال شد ✅" if fish_auto_enabled else "ماهی‌گیری خودکار غیرفعال شد ❌"
+    elif low.startswith("fish interval"):
+        sec = parse_duration_seconds(low[len("fish interval"):].strip())
+        if sec is None or sec < FISH_COOLDOWN_SECONDS:
+            return None
+        fish_interval_seconds = sec
+        msg = f"فاصله‌ی ماهی‌گیری روی {sec/60:g} دقیقه تنظیم شد ✅"
     elif re.fullmatch(r"feed\s+\d+\s*/\s*\d+", low):
         x, y = [int(v) for v in re.findall(r"\d+", low)]
         feed_rules[x] = y
@@ -1973,38 +2051,6 @@ async def rescue_loop(chat_id: int, msg_id: int):
         await asyncio.sleep(rescue_delay_seconds)
 
 
-# --- ذخیره‌ی عکس/ویدیوی نابودشونده (سکرت/یک‌بار‌مصرف) توی Saved Messages ---
-@client.on(events.NewMessage(incoming=True))
-async def ttl_watcher(event):
-    if not ttl_save_enabled or not event.is_private or not event.message.media:
-        return
-    ttl = getattr(event.message.media, "ttl_seconds", None)
-    if not ttl:
-        return
-    try:
-        sender = await event.get_sender()
-        name = " ".join(x for x in [getattr(sender, "first_name", None), getattr(sender, "last_name", None)] if x) or "Unknown"
-        uname = f"@{sender.username}" if getattr(sender, "username", None) else "no username"
-        caption = f"🔒 Self-destruct media saved\nFrom: {name} ({uname}) — ID {event.sender_id}\nTimer: {ttl}s"
-        tmpdir = tempfile.mkdtemp(prefix="ttl_")
-        path = await event.message.download_media(file=tmpdir + os.sep)
-        if not path:
-            await client.send_message("me", caption + "\n⚠️ Could not download the media.")
-            return
-        await client.send_file("me", path, caption=caption)
-        try:
-            os.remove(path)
-            os.rmdir(tmpdir)
-        except OSError:
-            pass
-    except Exception as e:
-        print(f"ttl: {e}")
-        try:
-            await client.send_message("me", f"⚠️ Failed to save a self-destruct media: {e}")
-        except Exception:
-            pass
-
-
 # --- ذخیره‌ی پیام‌های پیوی (همه‌چیز: متن، ویس، استیکر، مدیا، ...) توی یک کانال ---
 # اول خودِ پیام فرستاده میشه، و زیرش اسم، یوزرنیم، آیدی و ساعت فرستنده
 @client.on(events.NewMessage(incoming=True))
@@ -2015,6 +2061,9 @@ async def dm_logger(event):
     if event.sender_id in TELEGRAM_SERVICE_IDS or event.sender_id == OWNER_ID:
         return
     msg = event.message
+    if getattr(msg.media, "ttl_seconds", None):
+        return  # مدیای نابودشونده ذخیره نمیشه
+    _cache_dm_text(event.chat_id, msg.id, msg.message or "")
     try:
         sender = await event.get_sender()
         if sender is None:
@@ -2053,8 +2102,6 @@ async def dm_logger(event):
 
         no_caption = bool(msg.sticker or msg.video_note)
         cap = (text + "\n\n" if text else "") + info
-        if getattr(msg.media, "ttl_seconds", None):
-            cap = f"⏱ مدیای نابودشونده ({msg.media.ttl_seconds}s)\n" + cap
         try:
             if no_caption or len(cap) > 1000:
                 await send_media(None)
@@ -2069,6 +2116,60 @@ async def dm_logger(event):
         print(f"dm-log: {e}")
 
 
+# --- ذخیره‌ی پیام‌های ویرایش‌شده‌ی پیوی توی کانال (قبل و بعد از ویرایش) ---
+dm_text_cache: dict[tuple[int, int], str] = {}
+
+
+def _cache_dm_text(chat_id: int, msg_id: int, text: str):
+    """متن آخرین نسخه‌ی هر پیام پیوی رو نگه می‌داره تا موقع ویرایش، متن «قبل» هم نشون داده بشه"""
+    if len(dm_text_cache) > 3000:
+        for k in list(dm_text_cache)[:1000]:
+            dm_text_cache.pop(k, None)
+    dm_text_cache[(chat_id, msg_id)] = text
+
+
+def _short(t: str, n: int = 1500) -> str:
+    t = t or ""
+    return t if len(t) <= n else t[:n] + "…"
+
+
+@client.on(events.MessageEdited(incoming=True))
+async def dm_edit_logger(event):
+    if not dm_log_enabled or dm_log_target is None or not event.is_private:
+        return
+    if event.sender_id in TELEGRAM_SERVICE_IDS or event.sender_id == OWNER_ID:
+        return
+    msg = event.message
+    new = msg.message or ""
+    old = dm_text_cache.get((event.chat_id, msg.id))
+    if old is not None and old == new:
+        return  # ویرایش متن نبوده (مثلاً تغییر دکمه/واکنش)
+    if old is None and not new:
+        return
+    _cache_dm_text(event.chat_id, msg.id, new)
+    try:
+        sender = await event.get_sender()
+        if sender is None:
+            return
+        name = " ".join(x for x in [getattr(sender, "first_name", None), getattr(sender, "last_name", None)] if x) or "Unknown"
+        uname = f"@{sender.username}" if getattr(sender, "username", None) else "—"
+        bot_tag = " 🤖" if getattr(sender, "bot", False) else ""
+        info = (
+            "┄┄┄┄┄┄┄┄┄┄\n✏️ پیام ویرایش‌شده از:\n"
+            f"👤 {name}{bot_tag}\n🔗 {uname}\n🆔 {event.sender_id}\n"
+            f"🕐 {_local_now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        body = ""
+        if old is not None:
+            body += f"❌ قبل از ویرایش:\n{_short(old)}\n\n"
+        body += f"✅ بعد از ویرایش:\n{_short(new) or '(بدون متن)'}"
+        if msg.media:
+            body += "\n📎 (این پیام مدیا هم داره)"
+        await client.send_message(dm_log_target, f"{body}\n\n{info}")
+    except Exception as e:
+        print(f"dm-edit-log: {e}")
+
+
 async def main():
     global OWNER_ID
     await client.start()
@@ -2076,6 +2177,7 @@ async def main():
     OWNER_ID = me.id
     load_settings()
     asyncio.create_task(settings_saver_loop())
+    asyncio.create_task(fish_loop())
     print("سلف‌بات اجرا شد. دستورات:")
     print("  meow on [دقیقه] / meow off")
     print("  clock bio on/off | clock name on/off")
