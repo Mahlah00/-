@@ -42,7 +42,7 @@ from telethon.tl.types import PeerChannel
 # ====== تنظیمات ======
 api_id = 35263817          # <-- اینجا رو با api_id خودت جایگزین کن
 api_hash = "8f221cbae9e25cdafba56e897ed39b5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "meow_1"
+session_name = "Mo"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
@@ -83,7 +83,7 @@ feed_lock = asyncio.Lock()
 rescued_msg_ids: set[tuple[int, int]] = set()
 RESCUE_DONE_WORDS = ("کشته شد", "علت مرگ", "نجات پیدا", "نجات یافت", "نجات داده شد", "نجات داد", "صاحب پیدا کرد", "صاحب یک خونه")
 rescue_max_tries = 10          # حداکثر تعداد کلیک روی هر پیام نجات
-rescue_delay_seconds = 1.3     # فاصله‌ی بین کلیک‌ها
+rescue_delay_seconds = 1.2     # فاصله‌ی بین کلیک‌ها
 
 afk_enabled = False
 afk_message = "فعلاً نیستم، بعداً جواب می‌دم 🌙"
@@ -503,17 +503,25 @@ def _clean(t: str) -> str:
 
 
 def parse_stomach(text: str):
-    """«شکم : ... (15 / 7)» → (ظرفیت شکم=15، پُری فعلی=7). عدد اول ظرفیتِ مقام گربه‌ست.
+    """«شکم : ... (0 / 12)» → (ظرفیت=12، پُری فعلی=0).
+    توی پیام واقعیِ ربات ترتیب «پُری / ظرفیت» هست ولی چون متن راست‌به‌چپ نمایش داده میشه
+    روی صفحه برعکس دیده میشه (12 / 0). برای همین به ترتیب تکیه نمی‌کنیم:
+    عدد بزرگ‌تر = ظرفیت، عدد کوچک‌تر = پُری فعلی (پُری هیچ‌وقت از ظرفیت بیشتر نمیشه).
     مستقل از متن جلوی شکم (گشنمیو، پره، ...) و از علامت‌های نامرئی"""
     t = _clean(text)
     pat = r"\(\s*(\d+)\s*/\s*(\d+)\s*\)"
+    m = None
     for ln in t.splitlines():
         if "شکم" in ln:
             m = re.search(pat, ln)
             if m:
-                return int(m.group(1)), int(m.group(2))
-    m = re.search(pat, t)  # اگه «شکم» و عدد توی یه خط نبودن
-    return (int(m.group(1)), int(m.group(2))) if m else None
+                break
+    if not m:
+        m = re.search(pat, t)  # اگه «شکم» و عدد توی یه خط نبودن
+    if not m:
+        return None
+    a, b = int(m.group(1)), int(m.group(2))
+    return max(a, b), min(a, b)
 
 
 def _loose(t: str) -> str:
@@ -982,7 +990,7 @@ feed interval off — برگشت به حالت «چک بعد از هر فارم�
 
 feed text add من گشنمیووو — متن گرسنگی اضافه میکنه: اگه ربات میویی بعد از «پیشی» جلوی «شکم» این متن (یا متن‌های شبیهش، مثلاً با «و» و «.» اضافه) رو نوشت، سلف به پیشی غذا میده
 feed text del <text> — حذف یک متن / feed text list — نمایش متن‌ها / feed text reset — برگشت به پیش‌فرض (گشنمیو ، دیگه کار نمیکنمیو)
-(اختیاری) feed 12/7 — قانون عددی هم میشه گذاشت؛ ولی ملاک اصلی همون متن‌هاست
+(اختیاری) feed 12/7 — قانون عددی هم میشه گذاشت (عدد اول ظرفیت شکم، عدد دوم آستانه‌ی پُری)؛ ولی ملاک اصلی همون متن‌هاست
 feed rules — نمایش قانون‌ها / feed reset — پاک کردن قانون‌ها
 
 fish sell above 50000 — ماهی پخته‌ی با ارزش ≥ این عدد فروخته میشه (50k هم قبوله)
@@ -1407,7 +1415,7 @@ async def handler(event):
             await event.edit("غذادهی غیرفعال است ❌ — اول بنویس: feed on")
         else:
             feed_setup_stage = "cap"
-            await event.edit("🍖 ظرفیت شکم گربه رو وارد کنید\n(همون عدد اول داخل پرانتز جلوی «شکم»؛ مثلاً 15)")
+            await event.edit("🍖 ظرفیت شکم گربه رو وارد کنید\n(همون عدد بزرگ‌تر داخل پرانتز جلوی «شکم»؛ مثلاً 15)")
 
     elif re.fullmatch(r"feed\s+\d+\s*/\s*\d+", lower):
         a, b = [int(x) for x in re.findall(r"\d+", lower)]
