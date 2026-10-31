@@ -41,14 +41,14 @@ from telethon.errors import FloodWaitError
 from telethon.tl.types import PeerChannel
 
 # ====== تنظیمات ======
-api_id = 30213358          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "74b35d20203b6670dafcc595f81c4e46"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "matii"
+api_id = 37335770          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "06a09098419081a2a359cce96ab1eaaf"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "stii"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
 
-ADMIN_IDS: list[int] = [5888377320]        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
+ADMIN_IDS: list[int] = [5888377320,6227174154]        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
 
 MEOWIE_TRIGGER_TEXT = "پیشی"      # پیامی که برای فارم به گروه فرستاده میشه
 MEOWIE_BUTTON_KEYWORD = "برداشت میو پوینت ها"  # عبارت کامل دکمه، تا با دکمه‌های دیگه (مثلاً بانکی) اشتباه گرفته نشه
