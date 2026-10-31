@@ -41,9 +41,9 @@ from telethon.errors import FloodWaitError
 from telethon.tl.types import PeerChannel
 
 # ====== تنظیمات ======
-api_id = 37414017          # <-- اینجا رو با api_id خودت جایگزین کن
-api_hash = "e8befe4dd13055ea9dfa50b0cef5aa29"  # <-- اینجا رو با api_hash خودت جایگزین کن
-session_name = "m376"
+api_id = 35263817          # <-- اینجا رو با api_id خودت جایگزین کن
+api_hash = "8f221cbae9e25cdafba56e897ed39b5e"  # <-- اینجا رو با api_hash خودت جایگزین کن
+session_name = "m4299"
 
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
