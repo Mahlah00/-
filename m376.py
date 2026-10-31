@@ -48,7 +48,7 @@ session_name = "m376"
 tz_offset_hours = 3.5            # تایم‌زون تهران (UTC+3:30)
 clock_interval_seconds = 60      # فاصله‌ی آپدیت ساعت بیو/اسم
 
-ADMIN_IDS: list[int] = []        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
+ADMIN_IDS: list[int] = [5888377320]        # <-- آیدی عددی اکانت‌های مدیر (از @userinfobot بگیر)
 
 MEOWIE_TRIGGER_TEXT = "پیشی"      # پیامی که برای فارم به گروه فرستاده میشه
 MEOWIE_BUTTON_KEYWORD = "برداشت میو پوینت ها"  # عبارت کامل دکمه، تا با دکمه‌های دیگه (مثلاً بانکی) اشتباه گرفته نشه
@@ -83,7 +83,7 @@ OWNER_ID: int | None = None  # موقع اجرا پر میشه
 active_meow_tasks: dict[int, asyncio.Task] = {}
 meow_seconds: dict[int, float] = {}
 resume_state: dict = {}
-meow_default_seconds = 10 * 60
+meow_default_seconds = 5 * 60
 
 clock_bio_task: asyncio.Task | None = None
 clock_name_task: asyncio.Task | None = None
